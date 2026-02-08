@@ -1,5 +1,22 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Development Workflow (PR-first)
+
+- Create a branch per task: `codex/<topic>`
+- Commit small, frequent changes
+- Open a PR when a task is ready (or end of day)
+- Self-review, then merge to `main`
+
+### Quick PR creation (GitHub CLI)
+
+```bash
+# once: authenticate if needed
+gh auth login
+
+# create PR from current branch
+gh pr create --fill
+```
+
 ## Getting Started
 
 First, run the development server:
