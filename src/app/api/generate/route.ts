@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { GenerateRequest } from "@/lib/types";
 import { validateGenerateRequest } from "@/lib/validation";
 import { mockGenerate } from "@/lib/mock";
-import { generateImagen, generateWithGemini } from "@/lib/vertex";
+import { generateWithGemini } from "@/lib/vertex";
 import { normalizeGemini } from "@/lib/normalize";
 import { randomUUID } from "crypto";
 import { saveCard } from "@/lib/firestore";
@@ -31,23 +31,10 @@ export async function POST(req: Request) {
     const gemini = await generateWithGemini(body.anxiety_text);
     const normalized = normalizeGemini(gemini);
 
-    const generateImagenWithRetry = async (prompt: string) => {
-      try {
-        return await generateImagen(prompt);
-      } catch (error) {
-        return await generateImagen(prompt);
-      }
-    };
-
-    const [negativeImage, positiveImage] = await Promise.all([
-      generateImagenWithRetry(normalized.negative.image_prompt),
-      generateImagenWithRetry(normalized.positive.image_prompt),
-    ]);
-
     const response = {
       card_id: randomUUID(),
-      negative: { ...normalized.negative, image_url: negativeImage },
-      positive: { ...normalized.positive, image_url: positiveImage },
+      negative: { ...normalized.negative, image_url: null },
+      positive: { ...normalized.positive, image_url: null },
       action: normalized.action,
       status: { completed: false, completed_at: null },
     };
@@ -57,6 +44,7 @@ export async function POST(req: Request) {
       user_id: body.user_id,
       anxiety_text: body.anxiety_text,
       created_at: Timestamp.now(),
+      image_status: "pending",
     });
 
     return NextResponse.json(response);

@@ -33,8 +33,10 @@ export default function Home() {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [imageError, setImageError] = useState<string | null>(null);
   const [data, setData] = useState<GenerateResponse | null>(null);
   const [completed, setCompleted] = useState(false);
+  const [imageLoading, setImageLoading] = useState(false);
 
   const onGenerate = async () => {
     setLoading(true);
@@ -51,10 +53,42 @@ export default function Home() {
         throw new Error(json.message || "生成に失敗しました");
       }
       setData(json);
+      setImageError(null);
+      setImageLoading(true);
+      const imageRes = await fetch("/api/images", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          card_id: json.card_id,
+          user_id: anonUserId,
+          negative_prompt: json.negative.image_prompt,
+          positive_prompt: json.positive.image_prompt,
+        }),
+      });
+      const imageJson = (await imageRes.json()) as {
+        status?: string;
+        negative_image_url?: string;
+        positive_image_url?: string;
+        message?: string;
+      };
+      if (imageRes.ok && imageJson.negative_image_url && imageJson.positive_image_url) {
+        setData((prev) =>
+          prev
+            ? {
+                ...prev,
+                negative: { ...prev.negative, image_url: imageJson.negative_image_url },
+                positive: { ...prev.positive, image_url: imageJson.positive_image_url },
+              }
+            : prev
+        );
+      } else if (!imageRes.ok) {
+        setImageError(imageJson.message || "画像生成に失敗しました。後ほど再試行してください。");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "エラーが発生しました");
     } finally {
       setLoading(false);
+      setImageLoading(false);
     }
   };
 
@@ -110,7 +144,9 @@ export default function Home() {
                     className="h-full w-full object-cover"
                   />
                 ) : (
-                  <div className="flex h-full items-center justify-center text-sm text-slate-500">画像を生成中...</div>
+                  <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                    {imageLoading ? "画像を生成中..." : "画像は後ほど生成されます"}
+                  </div>
                 )}
               </div>
               <div className="mt-3 text-xl font-semibold">{data.negative.name}</div>
@@ -128,7 +164,9 @@ export default function Home() {
                     className="h-full w-full object-cover"
                   />
                 ) : (
-                  <div className="flex h-full items-center justify-center text-sm text-slate-500">画像を生成中...</div>
+                  <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                    {imageLoading ? "画像を生成中..." : "画像は後ほど生成されます"}
+                  </div>
                 )}
               </div>
               <div className="mt-3 text-xl font-semibold">{data.positive.name}</div>
@@ -147,6 +185,7 @@ export default function Home() {
               >
                 行動できた
               </button>
+              {imageError && <div className="mt-2 text-amber-300">{imageError}</div>}
               {completed && <div className="mt-2 text-emerald-300">カードを浄化しました</div>}
             </div>
           </section>

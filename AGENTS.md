@@ -247,3 +247,8 @@ Result view:
 History view:
 - Title: "これまでのカード"
 - Resurface label: "以前乗り越えたカードです"
+
+## Image Generation Execution (Async)
+- /api/generate returns text results immediately and stores card with image_status=pending.
+- Client triggers /api/images to generate Imagen assets.
+- On Imagen quota errors, return text-only and show "later" messaging.
