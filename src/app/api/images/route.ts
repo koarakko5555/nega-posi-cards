@@ -7,8 +7,8 @@ const isMock = () => process.env.MOCK_GENERATION === "true";
 type ImageRequest = {
   card_id: string;
   user_id: string;
-  negative_prompt: string;
-  positive_prompt: string;
+  kind: "negative" | "positive";
+  prompt: string;
 };
 
 export async function POST(req: Request) {
@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid_json" }, { status: 400 });
   }
 
-  if (!body.card_id || !body.user_id || !body.negative_prompt || !body.positive_prompt) {
+  if (!body.card_id || !body.user_id || !body.kind || !body.prompt) {
     return NextResponse.json({ error: "validation_error" }, { status: 400 });
   }
 
@@ -28,29 +28,28 @@ export async function POST(req: Request) {
   }
 
   try {
-    const [negativeImage, positiveImage] = await Promise.all([
-      generateImagen(body.negative_prompt),
-      generateImagen(body.positive_prompt),
-    ]);
-
+    const imageUrl = await generateImagen(body.prompt);
     await updateCardImages(body.card_id, body.user_id, {
-      negative_image_url: negativeImage,
-      positive_image_url: positiveImage,
-      image_status: "ready",
+      ...(body.kind === "negative" ? { negative_image_url: imageUrl } : {}),
+      ...(body.kind === "positive" ? { positive_image_url: imageUrl } : {}),
+      image_status: body.kind === "positive" ? "ready" : "partial",
       image_error: null,
     });
 
     return NextResponse.json({
-      status: "ready",
-      negative_image_url: negativeImage,
-      positive_image_url: positiveImage,
+      status: body.kind === "positive" ? "ready" : "partial",
+      image_url: imageUrl,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "image_generation_failed";
+    const isFiltered = message.includes("raiFilteredReason");
     await updateCardImages(body.card_id, body.user_id, {
-      image_status: "error",
+      image_status: isFiltered ? "filtered" : "error",
       image_error: message,
     });
+    if (isFiltered) {
+      return NextResponse.json({ status: "filtered", message: "画像が安全フィルタでブロックされました。" });
+    }
     return NextResponse.json({ error: "image_generation_failed", message }, { status: 500 });
   }
 }

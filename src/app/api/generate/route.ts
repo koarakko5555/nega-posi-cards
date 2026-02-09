@@ -39,8 +39,10 @@ export async function POST(req: Request) {
       status: { completed: false, completed_at: null },
     };
 
+    const cleaned = JSON.parse(JSON.stringify(response));
+
     await saveCard({
-      ...response,
+      ...cleaned,
       user_id: body.user_id,
       anxiety_text: body.anxiety_text,
       created_at: Timestamp.now(),

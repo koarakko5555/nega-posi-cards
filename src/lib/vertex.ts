@@ -63,10 +63,10 @@ Rules:
 
 Templates:
 Negative:
-A portrait tarot card illustration, dark mystical atmosphere, hybrid of modern design and ancient mural aesthetics, moonlight illumination, fresco wall texture, subtle metallic ink, symbolic but non-figurative, negative emotion: {emotion}, card title: "{negative_name}" as small glyph-like typography, 9:16 aspect ratio, high detail, cinematic shadows, desaturated palette with deep indigo and charcoal.
+Hand-drawn tarot card illustration with an antique mural look, warm sepia tones, inked line art, textured parchment, ornate border frame, Japanese text banner, central modern scene that symbolizes {emotion}, painterly shading, subtle gold accents, 9:16 aspect ratio, highly detailed.
 
 Positive:
-A portrait tarot card illustration, soft pale watercolor, hybrid of modern design and ancient mural aesthetics, moonlight glow, fresco wall texture, gentle gradients, symbolic but non-figurative, positive shift: {positive_theme}, card title: "{positive_name}" as small glyph-like typography, 9:16 aspect ratio, airy composition, pastel palette with soft blues and warm ivory.
+Hand-drawn tarot card illustration with an antique mural look, warm sepia tones, inked line art, textured parchment, ornate border frame, Japanese text banner, central modern scene that symbolizes {positive_theme}, painterly shading, subtle gold accents, 9:16 aspect ratio, highly detailed.
 
 Anxiety text:
 ${anxietyText}`;
@@ -148,7 +148,7 @@ export const generateImagen = async (prompt: string): Promise<string> => {
       parameters: {
         sampleCount: 1,
         aspectRatio: "9:16",
-        personGeneration: "dont_allow",
+        personGeneration: "allow",
         includeRaiReason: true,
         language: "en",
         outputOptions: {
@@ -164,10 +164,11 @@ export const generateImagen = async (prompt: string): Promise<string> => {
   }
 
   const data = (await res.json()) as {
-    predictions?: Array<{ bytesBase64Encoded?: string }>;
+    predictions?: Array<{ bytesBase64Encoded?: string; raiFilteredReason?: string }>;
     error?: { message?: string };
   };
-  const base64 = data.predictions?.[0]?.bytesBase64Encoded;
+  const prediction = data.predictions?.[0];
+  const base64 = prediction?.bytesBase64Encoded;
   if (!base64) {
     const payload = JSON.stringify(data);
     throw new Error(`Imagen response missing image bytes: ${payload}`);

@@ -19,6 +19,7 @@ export async function GET(req: Request) {
     const cards = await getHistory(userId);
     return NextResponse.json({ cards });
   } catch (error) {
-    return NextResponse.json({ error: "history_failed" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "history_failed";
+    return NextResponse.json({ error: "history_failed", message }, { status: 500 });
   }
 }

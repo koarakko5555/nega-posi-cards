@@ -28,11 +28,11 @@ const pickKeywords = (value: unknown): [string, string] | null => {
   return [value[0], value[1]];
 };
 
-const buildNegativePrompt = (emotion: string, name: string) =>
-  `A portrait tarot card illustration, dark mystical atmosphere, hybrid of modern design and ancient mural aesthetics, moonlight illumination, fresco wall texture, subtle metallic ink, symbolic but non-figurative, negative emotion: ${emotion || "anxiety"}, card title: "${name}" as small glyph-like typography, 9:16 aspect ratio, high detail, cinematic shadows, desaturated palette with deep indigo and charcoal.`;
+const buildNegativePrompt = (emotion: string) =>
+  `Hand-drawn tarot card illustration with an antique mural look, warm sepia tones, inked line art, textured parchment, ornate border frame, Japanese text banner, central modern scene that symbolizes ${emotion || "anxiety"}, painterly shading, subtle gold accents, 9:16 aspect ratio, highly detailed.`;
 
-const buildPositivePrompt = (theme: string, name: string) =>
-  `A portrait tarot card illustration, soft pale watercolor, hybrid of modern design and ancient mural aesthetics, moonlight glow, fresco wall texture, gentle gradients, symbolic but non-figurative, positive shift: ${theme || "hope"}, card title: "${name}" as small glyph-like typography, 9:16 aspect ratio, airy composition, pastel palette with soft blues and warm ivory.`;
+const buildPositivePrompt = (theme: string) =>
+  `Hand-drawn tarot card illustration with an antique mural look, warm sepia tones, inked line art, textured parchment, ornate border frame, Japanese text banner, central modern scene that symbolizes ${theme || "hope"}, painterly shading, subtle gold accents, 9:16 aspect ratio, highly detailed.`;
 
 export const normalizeGemini = (input: GeminiResult): NormalizedGemini => {
   const root = (input as any).reflection ?? input;
@@ -52,12 +52,12 @@ export const normalizeGemini = (input: GeminiResult): NormalizedGemini => {
     negative.image_prompt ??
     prompts.negative_card_prompt ??
     prompts.negative_prompt ??
-    (negative.name ? buildNegativePrompt(String(negative.emotion ?? ""), String(negative.name)) : undefined);
+    buildNegativePrompt(String(negative.emotion ?? ""));
   const positivePrompt =
     positive.image_prompt ??
     prompts.positive_card_prompt ??
     prompts.positive_prompt ??
-    (positive.name ? buildPositivePrompt(String(positive.theme ?? ""), String(positive.name)) : undefined);
+    buildPositivePrompt(String(positive.theme ?? ""));
 
   const isActionString = typeof action === "string";
   const actionTitle = isActionString

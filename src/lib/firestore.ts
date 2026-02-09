@@ -46,13 +46,18 @@ export const updateCardImages = async (cardId: string, userId: string, payload: 
   if (data.user_id !== userId) {
     throw new Error("forbidden");
   }
+  const safeNegative =
+    payload.negative_image_url && payload.negative_image_url.startsWith("data:")
+      ? null
+      : payload.negative_image_url;
+  const safePositive =
+    payload.positive_image_url && payload.positive_image_url.startsWith("data:")
+      ? null
+      : payload.positive_image_url;
+
   await ref.update({
-    ...(payload.negative_image_url !== undefined
-      ? { "negative.image_url": payload.negative_image_url }
-      : {}),
-    ...(payload.positive_image_url !== undefined
-      ? { "positive.image_url": payload.positive_image_url }
-      : {}),
+    ...(safeNegative !== undefined ? { "negative.image_url": safeNegative } : {}),
+    ...(safePositive !== undefined ? { "positive.image_url": safePositive } : {}),
     ...(payload.image_status !== undefined ? { image_status: payload.image_status } : {}),
     ...(payload.image_error !== undefined ? { image_error: payload.image_error } : {}),
   });

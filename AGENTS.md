@@ -78,11 +78,11 @@ This repository targets the hackathon deliverable for a "Negative / Positive Tar
 
 ### Negative Card (Dark Mystical)
 Template:
-A portrait tarot card illustration, dark mystical atmosphere, hybrid of modern design and ancient mural aesthetics, moonlight illumination, fresco wall texture, subtle metallic ink, symbolic but non-figurative, negative emotion: {emotion}, card title: "{negative_name}" as small glyph-like typography, 9:16 aspect ratio, high detail, cinematic shadows, desaturated palette with deep indigo and charcoal.
+Hand-drawn tarot card illustration with an antique mural look, warm sepia tones, inked line art, textured parchment, ornate border frame, Japanese text banner, central modern scene that symbolizes {emotion}, painterly shading, subtle gold accents, 9:16 aspect ratio, highly detailed.
 
 ### Positive Card (Soft Watercolor)
 Template:
-A portrait tarot card illustration, soft pale watercolor, hybrid of modern design and ancient mural aesthetics, moonlight glow, fresco wall texture, gentle gradients, symbolic but non-figurative, positive shift: {positive_theme}, card title: "{positive_name}" as small glyph-like typography, 9:16 aspect ratio, airy composition, pastel palette with soft blues and warm ivory.
+Hand-drawn tarot card illustration with an antique mural look, warm sepia tones, inked line art, textured parchment, ornate border frame, Japanese text banner, central modern scene that symbolizes {positive_theme}, painterly shading, subtle gold accents, 9:16 aspect ratio, highly detailed.
 
 ## Prompt Variables
 - {emotion}: short English phrase (e.g., rumination, fear, stagnation).
@@ -215,10 +215,10 @@ Rules:
 
 Templates:
 Negative:
-A portrait tarot card illustration, dark mystical atmosphere, hybrid of modern design and ancient mural aesthetics, moonlight illumination, fresco wall texture, subtle metallic ink, symbolic but non-figurative, negative emotion: {emotion}, card title: "{negative_name}" as small glyph-like typography, 9:16 aspect ratio, high detail, cinematic shadows, desaturated palette with deep indigo and charcoal.
+A portrait tarot card illustration, dark mystical atmosphere, hybrid of modern design and ancient mural aesthetics, moonlight illumination, fresco wall texture, subtle metallic ink, symbolic but non-figurative, negative emotion: {emotion}, card title: "{negative_name}" as small glyph-like typography, no people, no faces, no human figures, 9:16 aspect ratio, high detail, cinematic shadows, desaturated palette with deep indigo and charcoal.
 
 Positive:
-A portrait tarot card illustration, soft pale watercolor, hybrid of modern design and ancient mural aesthetics, moonlight glow, fresco wall texture, gentle gradients, symbolic but non-figurative, positive shift: {positive_theme}, card title: "{positive_name}" as small glyph-like typography, 9:16 aspect ratio, airy composition, pastel palette with soft blues and warm ivory.
+A portrait tarot card illustration, soft pale watercolor, hybrid of modern design and ancient mural aesthetics, moonlight glow, fresco wall texture, gentle gradients, symbolic but non-figurative, positive shift: {positive_theme}, card title: "{positive_name}" as small glyph-like typography, no people, no faces, no human figures, 9:16 aspect ratio, airy composition, pastel palette with soft blues and warm ivory.
 
 Return JSON only.
 
