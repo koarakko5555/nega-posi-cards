@@ -78,11 +78,11 @@ This repository targets the hackathon deliverable for a "Negative / Positive Tar
 
 ### Negative Card (Dark Mystical)
 Template:
-Hand-drawn tarot card illustration with an antique mural look, warm sepia tones, inked line art, textured parchment, ornate border frame, Japanese text banner, central modern scene that symbolizes {emotion}, painterly shading, subtle gold accents, 9:16 aspect ratio, highly detailed.
+Hand-drawn illustration, modern/anime-inspired style, central symbolic scene that makes the anxiety readable (visual metaphors for {emotion}), slightly dark but cute and approachable mood (about 0.85), soft dark base with gentle contrast, painterly shading, 9:16 aspect ratio, highly detailed, no text, no letters, no typography, minimal card framing, pop-art color pops, silhouettes or human shadow allowed.
 
 ### Positive Card (Soft Watercolor)
 Template:
-Hand-drawn tarot card illustration with an antique mural look, warm sepia tones, inked line art, textured parchment, ornate border frame, Japanese text banner, central modern scene that symbolizes {positive_theme}, painterly shading, subtle gold accents, 9:16 aspect ratio, highly detailed.
+Hand-drawn illustration, modern/anime-inspired style, central symbolic scene that embodies {positive_theme}, brighter and cuter mood (about 1.15), soft light palette with airy highlights, gentle glow, painterly shading, 9:16 aspect ratio, highly detailed, no text, no letters, no typography, minimal card framing.
 
 ## Prompt Variables
 - {emotion}: short English phrase (e.g., rumination, fear, stagnation).
@@ -210,6 +210,9 @@ Rules:
 - interpretation: 30-80 Japanese chars, non-blaming tone.
 - emotion/theme: short English phrase (1-3 words).
 - action: concrete, 10-15 minutes, no abstract advice.
+- action.title: short and clearly understandable. Must be title-only (no detail text).
+- action.reason: write the detail (separate from title).
+- action.minutes: required (10-15).
 - image_prompt: long-form prompt containing "9:16"; follow style rules.
 - No self-harm advice. If user mentions self-harm, set meta.safety.self_harm=true and provide gentle non-medical action.
 

@@ -29,10 +29,10 @@ const pickKeywords = (value: unknown): [string, string] | null => {
 };
 
 const buildNegativePrompt = (emotion: string) =>
-  `Hand-drawn tarot card illustration with an antique mural look, warm sepia tones, inked line art, textured parchment, ornate border frame, Japanese text banner, central modern scene that symbolizes ${emotion || "anxiety"}, painterly shading, subtle gold accents, 9:16 aspect ratio, highly detailed.`;
+  `Hand-drawn illustration, modern/anime-inspired style, central symbolic scene that makes the anxiety readable (visual metaphors for ${emotion || "anxiety"}), slightly dark but cute and approachable mood (about 0.85), soft dark base with gentle contrast, painterly shading, 9:16 aspect ratio, highly detailed, no text, no letters, no typography, minimal card framing, pop-art color pops, silhouettes or human shadow allowed.`;
 
 const buildPositivePrompt = (theme: string) =>
-  `Hand-drawn tarot card illustration with an antique mural look, warm sepia tones, inked line art, textured parchment, ornate border frame, Japanese text banner, central modern scene that symbolizes ${theme || "hope"}, painterly shading, subtle gold accents, 9:16 aspect ratio, highly detailed.`;
+  `Hand-drawn illustration, modern/anime-inspired style, central symbolic scene that embodies ${theme || "hope"}, brighter and cuter mood (about 1.15), soft light palette with airy highlights, gentle glow, painterly shading, 9:16 aspect ratio, highly detailed, no text, no letters, no typography, minimal card framing.`;
 
 export const normalizeGemini = (input: GeminiResult): NormalizedGemini => {
   const root = (input as any).reflection ?? input;
@@ -75,7 +75,9 @@ export const normalizeGemini = (input: GeminiResult): NormalizedGemini => {
   if (!positive.name || !positive.interpretation || !positiveKeywords || !positivePrompt) {
     throw new Error("Positive card fields missing");
   }
-  if (!actionTitle || typeof actionMinutes !== "number" || Number.isNaN(actionMinutes)) {
+  const resolvedMinutes =
+    typeof actionMinutes === "number" && !Number.isNaN(actionMinutes) ? actionMinutes : 10;
+  if (!actionTitle) {
     throw new Error(`Action fields missing. Payload=${JSON.stringify(input)}`);
   }
 
@@ -96,7 +98,7 @@ export const normalizeGemini = (input: GeminiResult): NormalizedGemini => {
     },
     action: {
       title: String(actionTitle),
-      minutes: Number(actionMinutes),
+      minutes: Number(resolvedMinutes),
       reason: String(actionReason || "").trim(),
     },
   };

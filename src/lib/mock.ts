@@ -26,6 +26,9 @@ export const mockGenerate = (input: GenerateRequest): GenerateResponse => {
       title: "紙に3行だけ書く",
       minutes: 10,
       reason: "頭の中の渦を外に出す最小の一歩",
+      scheduled_date: null,
+      checklist_done: false,
+      checklist_done_at: null,
     },
     status: {
       completed: false,
