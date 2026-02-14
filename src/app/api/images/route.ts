@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { updateCardImages } from "@/lib/firestore";
+import { uploadCardImage } from "@/lib/storage";
 import { generateImagen } from "@/lib/vertex";
 
 const isMock = () => process.env.MOCK_GENERATION === "true";
@@ -7,8 +8,9 @@ const isMock = () => process.env.MOCK_GENERATION === "true";
 type ImageRequest = {
   card_id: string;
   user_id: string;
-  kind: "negative" | "positive";
+  kind: "negative" | "positive" | "negative_candidate";
   prompt: string;
+  candidate_index?: number;
 };
 
 export async function POST(req: Request) {
@@ -24,11 +26,33 @@ export async function POST(req: Request) {
   }
 
   if (isMock()) {
-    return NextResponse.json({ status: "mock" });
+    return NextResponse.json({
+      status: "mock",
+      image_url: "/file.svg",
+      candidate_index: body.candidate_index ?? 0,
+    });
   }
 
   try {
-    const imageUrl = await generateImagen(body.prompt);
+    const dataUrl = await generateImagen(body.prompt);
+    const kindLabel =
+      body.kind === "negative_candidate"
+        ? `negative-candidate-${typeof body.candidate_index === "number" ? body.candidate_index + 1 : 1}`
+        : body.kind;
+    const imageUrl = await uploadCardImage({
+      cardId: body.card_id,
+      kind: kindLabel,
+      dataUrl,
+    });
+
+    if (body.kind === "negative_candidate") {
+      return NextResponse.json({
+        status: "candidate_ready",
+        image_url: imageUrl,
+        candidate_index: body.candidate_index ?? 0,
+      });
+    }
+
     await updateCardImages(body.card_id, body.user_id, {
       ...(body.kind === "negative" ? { negative_image_url: imageUrl } : {}),
       ...(body.kind === "positive" ? { positive_image_url: imageUrl } : {}),

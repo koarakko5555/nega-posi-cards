@@ -35,7 +35,12 @@ export async function POST(req: Request) {
       card_id: randomUUID(),
       negative: { ...normalized.negative, image_url: null },
       positive: { ...normalized.positive, image_url: null },
-      action: normalized.action,
+      action: {
+        ...normalized.action,
+        scheduled_date: null,
+        checklist_done: false,
+        checklist_done_at: null,
+      },
       status: { completed: false, completed_at: null },
     };
 

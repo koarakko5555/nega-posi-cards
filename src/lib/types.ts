@@ -24,6 +24,9 @@ export type ActionPlan = {
   title: string;
   minutes: number;
   reason: string;
+  scheduled_date?: string | null;
+  checklist_done?: boolean;
+  checklist_done_at?: string | null;
 };
 
 export type CardStatus = {
@@ -37,6 +40,17 @@ export type GenerateResponse = {
   positive: PositiveCard;
   action: ActionPlan;
   status: CardStatus;
+};
+
+export type CalendarItem = {
+  kind: "card" | "task";
+  id: string;
+  card_id?: string;
+  task_id?: string;
+  scheduled_date: string;
+  action_title: string;
+  checklist_done: boolean;
+  image_url?: string | null;
 };
 
 export type CompleteRequest = {
