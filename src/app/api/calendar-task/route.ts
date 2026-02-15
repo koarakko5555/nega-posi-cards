@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createCalendarTask } from "@/lib/firestore";
+import { getOptionalAuthUid } from "@/lib/auth";
 import { randomUUID } from "crypto";
 import { Timestamp } from "firebase-admin/firestore";
 
@@ -23,11 +24,19 @@ export async function POST(req: Request) {
 
   const id = randomUUID();
   try {
+    const uid = await getOptionalAuthUid(req);
+    if (uid && body.user_id !== uid) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
     await createCalendarTask({
       id,
       user_id: body.user_id,
       scheduled_date: body.scheduled_date,
       action_title: body.action_title,
+      action_detail: "",
+      anxiety_text: "",
+      negative_image_url: null,
+      positive_image_url: null,
       checklist_done: false,
       created_at: Timestamp.now(),
     });

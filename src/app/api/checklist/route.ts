@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { updateActionPlan, updateCalendarTask } from "@/lib/firestore";
+import { getOptionalAuthUid } from "@/lib/auth";
 
 type ChecklistRequest = {
   card_id: string;
@@ -21,6 +22,10 @@ export async function POST(req: Request) {
   }
 
   try {
+    const uid = await getOptionalAuthUid(req);
+    if (uid && body.user_id !== uid) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
     const updated = body.task_id
       ? await updateCalendarTask(body.task_id, body.user_id, {
           checklist_done: body.done,

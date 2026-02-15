@@ -27,6 +27,7 @@ export type ActionPlan = {
   scheduled_date?: string | null;
   checklist_done?: boolean;
   checklist_done_at?: string | null;
+  image_url?: string | null;
 };
 
 export type CardStatus = {
@@ -49,8 +50,12 @@ export type CalendarItem = {
   task_id?: string;
   scheduled_date: string;
   action_title: string;
+  action_detail?: string;
+  anxiety_text?: string;
   checklist_done: boolean;
   image_url?: string | null;
+  negative_image_url?: string | null;
+  positive_image_url?: string | null;
 };
 
 export type CompleteRequest = {

@@ -26,6 +26,11 @@ export type GeminiResult = {
   };
 };
 
+export type SelfImageResult = {
+  image_prompt: string;
+  description: string;
+};
+
 const auth = new GoogleAuth({
   scopes: ["https://www.googleapis.com/auth/cloud-platform"],
 });
@@ -73,6 +78,29 @@ Hand-drawn illustration, modern/anime-inspired style, central symbolic scene tha
 
 Anxiety text:
 ${anxietyText}`;
+};
+
+const buildSelfImagePrompt = (historyText: string): string => {
+  return `You are creating JSON for a Japanese reflection app. Return ONLY valid JSON. No extra text.
+
+Based on the recent card summaries, generate:
+- description: 450-600 Japanese characters. The description must explicitly mention:
+  1) what kinds of anxieties the user is feeling,
+  2) what kinds of actions the user is trying to take,
+  3) what state the user is currently in, based on (1) and (2).
+  The tone should be very gentle, concrete, and kind. Use specific wording rather than abstract generalities.
+- image_prompt: an Imagen prompt for a single image that represents the user's current state.
+
+The image should feel gentle, hopeful, and introspective (not scary), with symbolic non-figurative motifs. Silhouettes are allowed. No text, no letters, no typography. Modern/anime-inspired, painterly shading, soft contrast, 9:16 aspect ratio, highly detailed.
+
+Output JSON schema:
+{
+  \"description\": \"string\",
+  \"image_prompt\": \"string\"
+}
+
+Recent entries:
+${historyText}`;
 };
 
 const extractJson = (text: string): string => {
@@ -131,6 +159,55 @@ export const generateWithGemini = async (anxietyText: string): Promise<GeminiRes
 
   const jsonText = extractJson(text);
   return JSON.parse(jsonText) as GeminiResult;
+};
+
+export const generateSelfImagePrompt = async (historyText: string): Promise<SelfImageResult> => {
+  const project = requireEnv("GOOGLE_CLOUD_PROJECT");
+  const location = requireEnv("GOOGLE_CLOUD_LOCATION");
+  const model = requireEnv("VERTEX_AI_MODEL_GEMINI");
+  const token = await getAccessToken();
+  const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/publishers/google/models/${model}:generateContent`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: buildSelfImagePrompt(historyText) }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.4,
+        maxOutputTokens: 1024,
+        responseMimeType: "application/json",
+        thinkingConfig: {
+          thinkingBudget: 0,
+        },
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Gemini API error: ${res.status} ${errorText}`);
+  }
+
+  const data = (await res.json()) as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  };
+  const parts = data.candidates?.[0]?.content?.parts ?? [];
+  const text = parts.map((part) => part.text ?? "").join("").trim();
+  if (!text) {
+    throw new Error(`Gemini response missing text: ${JSON.stringify(data)}`);
+  }
+
+  const jsonText = extractJson(text);
+  return JSON.parse(jsonText) as SelfImageResult;
 };
 
 export const generateImagen = async (prompt: string): Promise<string> => {

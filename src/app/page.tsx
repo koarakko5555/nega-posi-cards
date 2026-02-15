@@ -1,393 +1,243 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { getFirebaseAuth, getGoogleProvider, hasFirebaseConfig } from "@/lib/firebaseClient";
+import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 
-type GenerateResponse = {
+type GalleryItem = {
   card_id: string;
-  negative: {
-    name: string;
-    keywords: [string, string];
-    interpretation: string;
-    image_prompt: string;
-    image_url?: string;
-  };
-  positive: {
-    name: string;
-    keywords: [string, string];
-    interpretation: string;
-    image_prompt: string;
-    image_url?: string;
-  };
-  action: {
-    title: string;
-    minutes: number;
-    reason: string;
-    scheduled_date?: string | null;
-    checklist_done?: boolean;
-    checklist_done_at?: string | null;
-  };
-  status: {
-    completed: boolean;
-    completed_at: string | null;
-  };
-};
-
-type CalendarItem = {
-  kind: "card" | "task";
-  id: string;
-  card_id?: string;
-  task_id?: string;
-  scheduled_date: string;
-  action_title: string;
-  checklist_done: boolean;
-  image_url?: string | null;
-};
-
-type NegativeCandidate = {
-  url: string | null;
-  status: "loading" | "ready" | "error";
-  error?: string | null;
-};
-
-const USER_ID_KEY = "nega_posi_user_id";
-const WEEK_LABELS = ["日", "月", "火", "水", "木", "金", "土"];
-const pad = (value: number) => String(value).padStart(2, "0");
-const formatDateKey = (date: Date) =>
-  `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-
-const buildCalendar = (base: Date) => {
-  const year = base.getFullYear();
-  const month = base.getMonth();
-  const firstDay = new Date(year, month, 1);
-  const lastDay = new Date(year, month + 1, 0);
-  const startWeekday = firstDay.getDay();
-  const daysInMonth = lastDay.getDate();
-
-  const cells: Array<{ day: number | null; isToday: boolean; dateKey?: string }> = [];
-  const today = new Date();
-  const isSameMonth = today.getFullYear() === year && today.getMonth() === month;
-  const todayDate = isSameMonth ? today.getDate() : -1;
-
-  for (let i = 0; i < startWeekday; i += 1) {
-    cells.push({ day: null, isToday: false });
-  }
-  for (let day = 1; day <= daysInMonth; day += 1) {
-    const dateKey = `${year}-${pad(month + 1)}-${pad(day)}`;
-    cells.push({ day, isToday: day === todayDate, dateKey });
-  }
-  while (cells.length % 7 !== 0) {
-    cells.push({ day: null, isToday: false });
-  }
-  return { year, month, cells };
+  negative_image_url?: string | null;
+  positive_image_url?: string | null;
+  created_at?: string | null;
 };
 
 export default function Home() {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<GenerateResponse | null>(null);
-  const [candidates, setCandidates] = useState<NegativeCandidate[]>([]);
-  const [selectedCandidate, setSelectedCandidate] = useState<number | null>(null);
-  const [actionTitle, setActionTitle] = useState("");
-  const [actionReason, setActionReason] = useState("");
-  const [registering, setRegistering] = useState(false);
-  const [registeredDate, setRegisteredDate] = useState<string | null>(null);
-  const [actionImageUrl, setActionImageUrl] = useState<string | null>(null);
-  const [actionImageLoading, setActionImageLoading] = useState(false);
-  const [calendarItems, setCalendarItems] = useState<CalendarItem[]>([]);
-  const [calendarLoading, setCalendarLoading] = useState(false);
-  const [calendarError, setCalendarError] = useState<string | null>(null);
-  const [newTaskTitle, setNewTaskTitle] = useState("");
-  const [taskSaving, setTaskSaving] = useState(false);
+  const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  const [galleryError, setGalleryError] = useState<string | null>(null);
+  const [selfImageUrl, setSelfImageUrl] = useState<string | null>(null);
+  const [selfImageDescription, setSelfImageDescription] = useState<string | null>(null);
+  const [selfImageLoading, setSelfImageLoading] = useState(false);
+  const [selfImageError, setSelfImageError] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<string>(formatDateKey(new Date()));
-  const [activeMonth, setActiveMonth] = useState<Date>(() => new Date());
-  const calendar = buildCalendar(activeMonth);
+  const [anonId, setAnonId] = useState<string | null>(null);
+  const [idToken, setIdToken] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const negativeGalleryRef = useRef<HTMLDivElement | null>(null);
+  const positiveGalleryRef = useRef<HTMLDivElement | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
-    const stored = window.localStorage.getItem(USER_ID_KEY);
+    const auth = getFirebaseAuth();
+    if (!auth) {
+      return;
+    }
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setUserId(null);
+        setIdToken(null);
+        return;
+      }
+      const token = await user.getIdToken();
+      setUserId(user.uid);
+      setIdToken(token);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem("nega_posi_anon_id");
     if (stored) {
-      setUserId(stored);
+      setAnonId(stored);
       return;
     }
     const created = crypto.randomUUID();
-    window.localStorage.setItem(USER_ID_KEY, created);
-    setUserId(created);
+    window.localStorage.setItem("nega_posi_anon_id", created);
+    setAnonId(created);
   }, []);
 
-  const monthKey = `${calendar.year}-${pad(calendar.month + 1)}`;
+  const effectiveUserId = userId ?? anonId;
 
-  const loadCalendar = async (targetUserId: string) => {
-    setCalendarError(null);
-    setCalendarLoading(true);
+  const onLogin = async () => {
+    setAuthError(null);
     try {
-      const res = await fetch(`/api/calendar?user_id=${encodeURIComponent(targetUserId)}&month=${monthKey}`);
-      const json = (await res.json()) as { items?: CalendarItem[]; message?: string };
-      if (!res.ok || !json.items) {
-        throw new Error(json.message || "カレンダーの取得に失敗しました");
+      if (!hasFirebaseConfig()) {
+        setAuthError("Firebaseの設定が読み込めていません。");
+        return;
       }
-      setCalendarItems(json.items);
+      const auth = getFirebaseAuth();
+      if (!auth) {
+        setAuthError("Firebaseの設定が読み込めていません。");
+        return;
+      }
+      await signInWithPopup(auth, getGoogleProvider());
     } catch (err) {
-      setCalendarError(err instanceof Error ? err.message : "カレンダーの取得に失敗しました");
+      setAuthError(err instanceof Error ? err.message : "ログインに失敗しました");
+    }
+  };
+
+  const onLogout = async () => {
+    const auth = getFirebaseAuth();
+    if (!auth) return;
+    await signOut(auth);
+  };
+
+  const authHeader = useMemo(
+    () => (idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+    [idToken]
+  );
+
+  const loadGallery = async (targetUserId: string | null) => {
+    setGalleryError(null);
+    setGalleryLoading(true);
+    try {
+      const endpoint =
+        idToken && targetUserId
+          ? `/api/history?user_id=${encodeURIComponent(targetUserId)}`
+          : "/api/history?public=1";
+      const res = await fetch(endpoint, {
+        headers: authHeader,
+      });
+      const json = (await res.json()) as { items?: GalleryItem[]; message?: string };
+      if (!res.ok || !json.items) {
+        throw new Error(json.message || "図鑑の取得に失敗しました");
+      }
+      setGalleryItems(json.items);
+    } catch (err) {
+      setGalleryError(err instanceof Error ? err.message : "図鑑の取得に失敗しました");
     } finally {
-      setCalendarLoading(false);
+      setGalleryLoading(false);
     }
   };
 
   useEffect(() => {
-    if (!userId) return;
-    loadCalendar(userId);
-  }, [userId, monthKey]);
-
-  useEffect(() => {
-    const key = `${calendar.year}-${pad(calendar.month + 1)}`;
-    if (!selectedDate.startsWith(key)) {
-      setSelectedDate(`${key}-01`);
+    if (!idToken) {
+      loadGallery(null);
+      return;
     }
-  }, [calendar.year, calendar.month, selectedDate]);
+    loadGallery(userId);
+  }, [userId, idToken]);
 
   useEffect(() => {
-    if (typeof document === "undefined") return;
-    document.body.style.overflow = modalOpen ? "hidden" : "";
-    return () => {
-      document.body.style.overflow = "";
+    if (!userId || !idToken) return;
+    const loadSelfImage = async () => {
+      try {
+        const res = await fetch(`/api/self-image?user_id=${encodeURIComponent(userId)}`, {
+          headers: authHeader,
+        });
+        const json = (await res.json()) as { image_url?: string | null; description?: string | null };
+        if (!res.ok) return;
+        setSelfImageUrl(json.image_url ?? null);
+        setSelfImageDescription(json.description ?? null);
+      } catch {
+        // no-op
+      }
     };
-  }, [modalOpen]);
+    loadSelfImage();
+  }, [userId, idToken]);
 
-  const updateCandidate = (index: number, patch: Partial<NegativeCandidate>) => {
-    setCandidates((prev) => prev.map((item, idx) => (idx === index ? { ...item, ...patch } : item)));
+  const scrollGallery = (ref: { current: HTMLDivElement | null }, direction: number) => {
+    if (!ref.current) return;
+    ref.current.scrollBy({ left: direction * 260, behavior: "smooth" });
   };
 
   const onGenerate = async () => {
+    if (!effectiveUserId) {
+      setError("ユーザーIDを生成中です。少し待ってから再試行してください。");
+      return;
+    }
+    const trimmed = text.trim();
+    if (!trimmed) {
+      setError("不安を入力してください");
+      return;
+    }
     setLoading(true);
     setError(null);
-    setData(null);
-    setCandidates([]);
-    setSelectedCandidate(null);
-    setRegisteredDate(null);
     try {
-      if (!userId) {
-        throw new Error("ユーザーIDを生成中です。少し待ってから再試行してください。");
-      }
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ anxiety_text: text, user_id: userId, locale: "ja-JP" }),
-      });
-      const json = (await res.json()) as GenerateResponse & { error?: string; message?: string };
-      if (!res.ok) {
-        throw new Error(json.message || "生成に失敗しました");
-      }
-      setData(json);
-      setActionTitle(json.action.title);
-      setActionReason(json.action.reason);
-      setCandidates([
-        { url: null, status: "loading" },
-        { url: null, status: "loading" },
-        { url: null, status: "loading" },
-      ]);
-      setModalOpen(true);
-      setActionImageUrl(null);
-      setActionImageLoading(true);
-
-      await Promise.all(
-        [0, 1, 2].map(async (index) => {
-          try {
-            const imageRes = await fetch("/api/images", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                card_id: json.card_id,
-                user_id: userId,
-                kind: "negative_candidate",
-                candidate_index: index,
-                prompt: json.negative.image_prompt,
-              }),
-            });
-            const imageJson = (await imageRes.json()) as {
-              status?: string;
-              image_url?: string;
-              message?: string;
-            };
-            if (imageRes.ok && imageJson.image_url) {
-              updateCandidate(index, { url: imageJson.image_url, status: "ready" });
-            } else {
-              updateCandidate(index, {
-                status: "error",
-                error: imageJson.message || "画像生成に失敗しました",
-              });
-            }
-          } catch (err) {
-            updateCandidate(index, {
-              status: "error",
-              error: err instanceof Error ? err.message : "画像生成に失敗しました",
-            });
-          }
-        })
-      );
-      try {
-        const imageRes = await fetch("/api/images", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            card_id: json.card_id,
-            user_id: userId,
-            kind: "positive",
-            prompt: json.positive.image_prompt,
-          }),
-        });
-        const imageJson = (await imageRes.json()) as {
-          status?: string;
-          image_url?: string;
-        };
-        if (imageRes.ok && imageJson.image_url) {
-          setActionImageUrl(imageJson.image_url);
-        }
-      } catch {
-        // no-op
-      } finally {
-        setActionImageLoading(false);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "エラーが発生しました");
+      router.push(`/draw?text=${encodeURIComponent(trimmed)}`);
     } finally {
       setLoading(false);
     }
   };
-  const onSelectCandidate = async (index: number) => {
-    if (!data || !userId) return;
-    const candidate = candidates[index];
-    if (!candidate || !candidate.url) return;
-    setSelectedCandidate(index);
-    try {
-      const res = await fetch("/api/select-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ card_id: data.card_id, user_id: userId, image_url: candidate.url }),
-      });
-      if (res.ok) {
-        setData((prev) =>
-          prev
-            ? {
-                ...prev,
-                negative: { ...prev.negative, image_url: candidate.url },
-              }
-            : prev
-        );
-      }
-    } catch {
-      // no-op
-    }
-  };
 
-  const onRegister = async () => {
-    if (!data || !userId) return;
-    setRegistering(true);
+  const onGenerateSelfImage = async () => {
+    if (!userId) {
+      setSelfImageError("ログインが必要です");
+      return;
+    }
+    setSelfImageError(null);
+    setSelfImageLoading(true);
     try {
-      const scheduledDate = selectedDate;
-      const res = await fetch("/api/register", {
+      const res = await fetch("/api/self-image", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          card_id: data.card_id,
-          user_id: userId,
-          scheduled_date: scheduledDate,
-          action_title: actionTitle,
-          action_reason: actionReason,
-          action_minutes: data.action.minutes,
-        }),
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({ user_id: userId }),
       });
-      if (!res.ok) {
-        const json = (await res.json()) as { message?: string };
-        throw new Error(json.message || "カレンダー登録に失敗しました");
+      const json = (await res.json()) as { image_url?: string; description?: string; message?: string };
+      if (!res.ok || !json.image_url) {
+        throw new Error(json.message || "画像生成に失敗しました");
       }
-      setRegisteredDate(scheduledDate);
-      await loadCalendar(userId);
+      setSelfImageUrl(json.image_url);
+      setSelfImageDescription(json.description ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "カレンダー登録に失敗しました");
+      setSelfImageError(err instanceof Error ? err.message : "画像生成に失敗しました");
     } finally {
-      setRegistering(false);
+      setSelfImageLoading(false);
     }
   };
-
-  const onToggleChecklistItem = async (item: CalendarItem, done: boolean) => {
-    if (!userId) return;
-    try {
-      const res = await fetch("/api/checklist", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          card_id: item.kind === "card" ? item.card_id : undefined,
-          task_id: item.kind === "task" ? item.task_id : undefined,
-          user_id: userId,
-          done,
-        }),
-      });
-      if (res.ok) {
-        setCalendarItems((prev) =>
-          prev.map((entry) => (entry.id === item.id ? { ...entry, checklist_done: done } : entry))
-        );
-      }
-    } catch {
-      // no-op
-    }
-  };
-
-  const onAddCalendarTask = async () => {
-    if (!userId || newTaskTitle.trim().length === 0) return;
-    setTaskSaving(true);
-    try {
-      const res = await fetch("/api/calendar-task", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: userId,
-          scheduled_date: selectedDate,
-          action_title: newTaskTitle.trim(),
-        }),
-      });
-      if (!res.ok) {
-        const json = (await res.json()) as { message?: string };
-        throw new Error(json.message || "タスクの追加に失敗しました");
-      }
-      setNewTaskTitle("");
-      await loadCalendar(userId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "タスクの追加に失敗しました");
-    } finally {
-      setTaskSaving(false);
-    }
-  };
-
-  const itemsByDate = calendarItems.reduce<Record<string, number>>((acc, item) => {
-    acc[item.scheduled_date] = (acc[item.scheduled_date] || 0) + 1;
-    return acc;
-  }, {});
-  const tasksByDate = calendarItems.reduce<Record<string, CalendarItem[]>>((acc, item) => {
-    if (!acc[item.scheduled_date]) {
-      acc[item.scheduled_date] = [];
-    }
-    acc[item.scheduled_date].push(item);
-    return acc;
-  }, {});
-  const selectedItems = calendarItems.filter((item) => item.scheduled_date === selectedDate);
-  const completedCount = selectedItems.filter((item) => item.checklist_done).length;
-  const totalCount = selectedItems.length;
-  const progressPct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
-  const candidateReadyCount = candidates.filter((item) => item.status === "ready").length;
 
   return (
     <main className="mural-bg min-h-screen text-slate-100">
       <div className="mx-auto max-w-5xl px-6 py-12">
         <header className="mb-10">
-          <h1 className="text-2xl font-semibold text-slate-100">不安をカードに変える</h1>
-          <p className="mt-2 text-slate-300">今の不安をひとつだけ書いてください</p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold text-slate-100">Beyond Anxiety Cards</h1>
+              <nav className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                <Link
+                  href="/"
+                  className="rounded-full border border-emerald-300 bg-emerald-300 px-3 py-1 text-emerald-950"
+                >
+                  不安を言葉にしましょう
+                </Link>
+                <Link
+                  href="/calendar"
+                  className="rounded-full border border-slate-600 px-3 py-1 text-slate-200"
+                >
+                  不安から一歩踏み出しましょう
+                </Link>
+              </nav>
+            </div>
+            <div className="flex items-center gap-2">
+              {userId ? (
+                <button
+                  className="rounded-md border border-slate-600 px-3 py-2 text-sm text-slate-200"
+                  onClick={onLogout}
+                >
+                  ログアウト
+                </button>
+              ) : (
+                <button
+                  className="rounded-md bg-emerald-300 px-3 py-2 text-sm text-emerald-950"
+                  onClick={onLogin}
+                >
+                  Googleでログイン
+                </button>
+              )}
+            </div>
+          </div>
+          {authError && <p className="mt-2 text-sm text-rose-400">{authError}</p>}
         </header>
 
         <section className="mb-10 grid gap-6">
           <div className="mural-card rounded-2xl p-6">
-            <div className="mb-4 text-sm tracking-[0.2em] text-slate-400">不安の入力</div>
+            <div className="mb-2 text-sm tracking-[0.2em] text-slate-400">今の不安をひとつだけ書いてください</div>
             <textarea
               className="w-full rounded-lg border border-slate-700 bg-slate-950/70 p-4 text-slate-100 placeholder:text-slate-500"
               rows={6}
@@ -399,309 +249,136 @@ export default function Home() {
               <button
                 className="rounded-md bg-[#c2a86b] px-4 py-2 text-slate-900 disabled:opacity-50"
                 onClick={onGenerate}
-                disabled={loading || text.trim().length === 0}
+                disabled={loading || text.trim().length === 0 || !effectiveUserId}
               >
                 {loading ? "生成中..." : "カードを引く"}
               </button>
+              {!effectiveUserId && <span className="text-sm text-slate-400">準備中...</span>}
               {error && <span className="text-rose-400">{error}</span>}
             </div>
           </div>
 
           <div className="mural-card rounded-2xl p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <div className="text-sm tracking-[0.2em] text-slate-400">カレンダー</div>
-              <div className="flex items-center gap-2 text-sm text-slate-300">
-                <button
-                  className="rounded-full border border-slate-600 px-2 py-0.5 text-xs text-slate-300"
-                  onClick={() =>
-                    setActiveMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))
-                  }
-                >
-                  前月
-                </button>
-                <span>
-                  {calendar.year}年 {calendar.month + 1}月
-                </span>
-                <button
-                  className="rounded-full border border-slate-600 px-2 py-0.5 text-xs text-slate-300"
-                  onClick={() =>
-                    setActiveMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))
-                  }
-                >
-                  次月
-                </button>
-              </div>
+            <div className="mb-4 text-sm tracking-[0.2em] text-slate-400">
+              {idToken ? "あなたが最近生み出したイメージカード" : "みんなが最近生み出したイメージカード"}
             </div>
-            <div className="grid grid-cols-7 gap-2 text-xs text-slate-500">
-              {WEEK_LABELS.map((label) => (
-                <div key={label} className="text-center">
-                  {label}
-                </div>
-              ))}
-            </div>
-            <div className="mt-3 grid grid-cols-7 gap-2 text-sm">
-              {calendar.cells.map((cell, index) => (
-                <button
-                  key={`${cell.day ?? "x"}-${index}`}
-                  type="button"
-                  onClick={() => cell.dateKey && setSelectedDate(cell.dateKey)}
-                  disabled={!cell.day}
-                  className={`flex h-16 items-start justify-center rounded-lg px-1 pb-1 pt-2 text-left transition ${
-                    cell.dateKey === selectedDate
-                      ? "bg-emerald-300 text-slate-900 ring-2 ring-emerald-200"
-                      : cell.isToday
-                        ? "bg-amber-200 text-slate-900 ring-1 ring-amber-300"
-                        : cell.day
-                          ? itemsByDate[cell.dateKey || ""] 
-                            ? "bg-slate-900/70 text-slate-100"
-                            : "bg-slate-900/40 text-slate-200"
-                          : "text-slate-700"
-                  }`}
-                >
-                  <div className="flex h-full w-full flex-col gap-1">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className={cell.isToday && cell.dateKey !== selectedDate ? "font-semibold" : ""}>
-                        {cell.day ?? ""}
-                      </span>
-                      {cell.day && itemsByDate[cell.dateKey || ""] ? (
-                        <span
-                          className={`h-1.5 w-1.5 rounded-full ${
-                            cell.isToday && cell.dateKey !== selectedDate ? "bg-emerald-700" : "bg-emerald-300"
-                          }`}
-                        />
-                      ) : null}
-                    </div>
-                    {tasksByDate[cell.dateKey || ""]?.[0] ? (
-                      <div className="mt-0.5 overflow-hidden rounded-md">
-                        <div className="relative h-9 w-full overflow-hidden rounded-md">
-                          <img
-                            src={
-                              tasksByDate[cell.dateKey || ""]?.[0].image_url ||
-                              "/calendar-default.svg"
-                            }
-                            alt="タスク画像"
-                            className="h-full w-full object-cover"
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
-                          <div className="absolute bottom-0 left-0 right-0 px-1 pb-0.5 text-[9px] text-white">
-                            <div className="truncate">
-                              {tasksByDate[cell.dateKey || ""]?.[0].action_title}
-                            </div>
-                          </div>
-                        </div>
-                        {tasksByDate[cell.dateKey || ""]?.length > 1 && (
-                          <div
-                            className={`mt-0.5 text-[9px] ${
-                              cell.dateKey === selectedDate ? "text-slate-800" : "text-slate-300"
-                            }`}
-                          >
-                            +{tasksByDate[cell.dateKey || ""].length - 1}件
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div
-                        className={`space-y-0.5 text-[10px] ${
-                          cell.dateKey === selectedDate
-                            ? "text-slate-800"
-                            : cell.isToday
-                              ? "text-slate-700"
-                              : "text-slate-300"
-                        }`}
+            {galleryLoading && <div className="text-sm text-slate-400">読み込み中...</div>}
+            {galleryError && <div className="text-sm text-rose-400">{galleryError}</div>}
+            {!galleryLoading && !galleryError && galleryItems.length === 0 && (
+              <div className="text-sm text-slate-500">まだカードがありません</div>
+            )}
+            {!galleryLoading && !galleryError && galleryItems.length > 0 && (
+              <div className="grid gap-6">
+                <div>
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className="text-xs tracking-[0.25em] text-slate-400">不安カード</div>
+                    <div className="flex items-center gap-2 text-xs text-slate-300">
+                      <button
+                        className="rounded-full border border-slate-600 px-2 py-0.5 text-xs text-slate-300"
+                        onClick={() => scrollGallery(negativeGalleryRef, -1)}
                       >
-                        {(tasksByDate[cell.dateKey || ""] || []).slice(0, 2).map((item) => (
-                          <div key={item.id} className="truncate">
-                            {item.action_title}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                        &lt;
+                      </button>
+                      <button
+                        className="rounded-full border border-slate-600 px-2 py-0.5 text-xs text-slate-300"
+                        onClick={() => scrollGallery(negativeGalleryRef, 1)}
+                      >
+                        &gt;
+                      </button>
+                    </div>
                   </div>
-                </button>
-              ))}
-            </div>
-            <div className="mt-6">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>チェックリスト（{selectedDate}）</span>
-                <span>
-                  {completedCount}/{totalCount}
-                </span>
-              </div>
-              <div className="mt-2 h-2 w-full rounded-full bg-slate-800">
-                <div
-                  className="h-2 rounded-full bg-emerald-300 transition-all"
-                  style={{ width: `${progressPct}%` }}
-                />
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <input
-                  className="min-w-[220px] flex-1 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-100"
-                  placeholder="やることを追加"
-                  value={newTaskTitle}
-                  onChange={(e) => setNewTaskTitle(e.target.value)}
-                />
-                <button
-                  className="rounded-md bg-emerald-300 px-3 py-2 text-sm text-emerald-950 disabled:opacity-50"
-                  onClick={onAddCalendarTask}
-                  disabled={taskSaving || newTaskTitle.trim().length === 0}
-                >
-                  {taskSaving ? "追加中..." : "追加"}
-                </button>
-              </div>
-              {calendarLoading && <div className="mt-2 text-sm text-slate-400">読み込み中...</div>}
-              {calendarError && <div className="mt-2 text-sm text-rose-400">{calendarError}</div>}
-              {!calendarLoading && !calendarError && selectedItems.length === 0 && (
-                <div className="mt-2 text-sm text-slate-500">登録された行動はありません</div>
-              )}
-              {!calendarLoading && !calendarError && selectedItems.length > 0 && (
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  {selectedItems.map((item) => (
-                    <label
-                      key={item.id}
-                      className="group relative overflow-hidden rounded-xl border border-slate-800 bg-slate-900/60 text-sm"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={item.checklist_done}
-                        onChange={(e) => onToggleChecklistItem(item, e.target.checked)}
-                        className="absolute left-3 top-3 z-10 h-4 w-4"
-                      />
-                      <div className="h-28 w-full overflow-hidden">
+                  <div ref={negativeGalleryRef} className="flex gap-4 overflow-x-auto pb-2 pt-1 scroll-smooth">
+                    {galleryItems.map((item) => (
+                      <div
+                        key={`neg-${item.card_id}`}
+                        className="relative h-40 w-28 shrink-0 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60"
+                        title={item.created_at ?? undefined}
+                      >
                         <img
-                          src={item.image_url || "/calendar-default.svg"}
-                          alt="タスク画像"
-                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                          src={item.negative_image_url || "/calendar-default.svg"}
+                          alt="不安カード"
+                          className="h-full w-full object-cover"
                         />
-                        <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
                       </div>
-                      <div className="px-3 pb-3 pt-2">
-                        <div
-                          className={`line-clamp-2 ${
-                            item.checklist_done ? "line-through text-slate-500" : "text-slate-100"
-                          }`}
-                        >
-                          {item.action_title}
-                        </div>
-                      </div>
-                    </label>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              )}
+                <div>
+                  <div className="mb-3 flex items-center justify-between">
+                    <div className="text-xs tracking-[0.25em] text-slate-400">アクションカード</div>
+                    <div className="flex items-center gap-2 text-xs text-slate-300">
+                      <button
+                        className="rounded-full border border-slate-600 px-2 py-0.5 text-xs text-slate-300"
+                        onClick={() => scrollGallery(positiveGalleryRef, -1)}
+                      >
+                        &lt;
+                      </button>
+                      <button
+                        className="rounded-full border border-slate-600 px-2 py-0.5 text-xs text-slate-300"
+                        onClick={() => scrollGallery(positiveGalleryRef, 1)}
+                      >
+                        &gt;
+                      </button>
+                    </div>
+                  </div>
+                  <div ref={positiveGalleryRef} className="flex gap-4 overflow-x-auto pb-2 pt-1 scroll-smooth">
+                    {galleryItems.map((item) => (
+                      <div
+                        key={`pos-${item.card_id}`}
+                        className="relative h-40 w-28 shrink-0 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60"
+                        title={item.created_at ?? undefined}
+                      >
+                        <img
+                          src={item.positive_image_url || "/calendar-default.svg"}
+                          alt="アクションカード"
+                          className="h-full w-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="mural-card rounded-2xl p-6">
+            <div className="mb-2 text-sm tracking-[0.2em] text-slate-400">今のあなたの輪郭</div>
+            <div className="grid gap-4 md:grid-cols-[220px_1fr]">
+              <div className="mural-frame overflow-hidden rounded-2xl" style={{ aspectRatio: "9 / 16" }}>
+                {selfImageUrl ? (
+                  <img src={selfImageUrl} alt="今のあなたの輪郭" className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">
+                    {selfImageLoading ? "生成中..." : "まだ画像がありません"}
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col justify-between gap-3">
+                <div>
+                  <div className="text-sm text-slate-200">自分を見つけましょう</div>
+                  <p className="mt-2 text-sm text-slate-400">
+                    直近の不安カードとアクションカードから、今のあなたの状態を1枚のイメージにします。
+                  </p>
+                  {selfImageDescription && (
+                    <p className="mt-3 text-sm text-slate-200">{selfImageDescription}</p>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    className="rounded-md bg-emerald-300 px-4 py-2 text-emerald-950 disabled:opacity-50"
+                    onClick={onGenerateSelfImage}
+                    disabled={selfImageLoading}
+                  >
+                    {selfImageLoading ? "生成中..." : "自分を見つけましょう"}
+                  </button>
+                  {selfImageError && <span className="text-sm text-rose-400">{selfImageError}</span>}
+                </div>
+              </div>
             </div>
           </div>
         </section>
-
-        {data && modalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 py-6">
-            <div className="w-full max-w-3xl rounded-3xl border border-slate-700 bg-slate-950/95 p-6 shadow-2xl">
-              <div className="mb-4 flex items-center justify-between">
-                <div className="text-sm tracking-[0.3em] text-slate-400">カードを選ぶ</div>
-                <button
-                  className="rounded-full border border-slate-600 px-3 py-1 text-xs text-slate-300"
-                  onClick={() => setModalOpen(false)}
-                >
-                  閉じる
-                </button>
-              </div>
-              <section className="grid gap-6">
-                <div className="mural-card rounded-2xl p-6">
-                  <h2 className="mural-label text-xs">あなたの不安を一番表現できているものは？</h2>
-                  <div className="mt-3 text-xs text-slate-500">生成状況: {candidateReadyCount}/3</div>
-                  <div className="mt-2 h-2 w-full rounded-full bg-slate-800">
-                    <div
-                      className="h-2 rounded-full bg-[#c2a86b] transition-all"
-                      style={{ width: `${(candidateReadyCount / 3) * 100}%` }}
-                    />
-                  </div>
-
-                  <div className="mt-4 grid grid-cols-3 gap-3">
-                    {candidates.map((candidate, index) => (
-                      <button
-                        key={`candidate-${index}`}
-                        type="button"
-                        onClick={() => onSelectCandidate(index)}
-                        className={`mural-frame group relative overflow-hidden rounded-xl border transition ${
-                          selectedCandidate === index
-                            ? "border-emerald-200 ring-4 ring-emerald-300/60 shadow-[0_0_0_3px_rgba(16,185,129,0.25)]"
-                            : "border-transparent"
-                        }`}
-                        style={{ aspectRatio: "9 / 16" }}
-                        disabled={candidate.status !== "ready"}
-                      >
-                        {candidate.status === "ready" && candidate.url ? (
-                          <img
-                            src={candidate.url}
-                            alt={`候補${index + 1}`}
-                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                          />
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-xs text-slate-500">
-                            {candidate.status === "loading" ? "生成中..." : "生成失敗"}
-                          </div>
-                        )}
-                        {selectedCandidate === index && (
-                          <div className="absolute left-2 top-2 rounded-full bg-emerald-300 px-2 py-0.5 text-[10px] font-semibold text-emerald-950">
-                            選択中
-                          </div>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="mt-4 text-base font-semibold">{data.negative.name}</div>
-                </div>
-
-                <div className="mural-card rounded-2xl p-6">
-                  <h2 className="mural-label text-xs">不安を解消しましょう</h2>
-                  <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
-                    <div className="text-xs text-slate-400">タイトル</div>
-                    <input
-                      className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950/70 px-4 py-3 text-slate-100"
-                      value={actionTitle}
-                      onChange={(e) => setActionTitle(e.target.value)}
-                    />
-                    <div className="mt-4 text-xs text-slate-400">詳細</div>
-                    <textarea
-                      className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-950/70 p-4 text-slate-100"
-                      rows={4}
-                      value={actionReason}
-                      onChange={(e) => setActionReason(e.target.value)}
-                    />
-                  </div>
-                  <div className="mt-4">
-                    <div className="text-xs text-slate-400">行動イメージ</div>
-                    <div className="mural-frame mt-2 overflow-hidden rounded-2xl" style={{ aspectRatio: "16 / 9" }}>
-                      {actionImageUrl ? (
-                        <img src={actionImageUrl} alt="行動イメージ" className="h-full w-full object-cover" />
-                      ) : (
-                        <div className="flex h-full items-center justify-center text-sm text-slate-500">
-                          {actionImageLoading ? "画像を生成中..." : "画像は準備中です"}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="mt-4 flex items-center gap-3">
-                    <button
-                      className="rounded-md bg-emerald-300 px-4 py-2 text-emerald-950 disabled:opacity-50"
-                      onClick={onRegister}
-                      disabled={
-                        registering ||
-                        actionTitle.trim().length === 0 ||
-                        actionReason.trim().length === 0 ||
-                        !data.negative.image_url
-                      }
-                    >
-                      {registering ? "登録中..." : "カレンダーに登録"}
-                    </button>
-                    {registeredDate && <span className="text-sm text-emerald-300">登録しました</span>}
-                    {!data.negative.image_url && (
-                      <span className="text-sm text-slate-500">画像を選択してください</span>
-                    )}
-                  </div>
-                </div>
-              </section>
-            </div>
-          </div>
-        )}
       </div>
     </main>
   );

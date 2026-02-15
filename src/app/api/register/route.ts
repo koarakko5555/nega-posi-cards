@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { updateActionPlan } from "@/lib/firestore";
+import { getOptionalAuthUid } from "@/lib/auth";
+import { getAuthUid } from "@/lib/auth";
 
 type RegisterRequest = {
   card_id: string;
@@ -8,6 +10,7 @@ type RegisterRequest = {
   action_title: string;
   action_reason: string;
   action_minutes?: number;
+  action_image_url?: string | null;
 };
 
 export async function POST(req: Request) {
@@ -29,11 +32,20 @@ export async function POST(req: Request) {
   }
 
   try {
+    const uid = await getAuthUid(req);
+    if (body.user_id !== uid) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
+    const uid = await getOptionalAuthUid(req);
+    if (uid && uid !== body.user_id) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
     const updated = await updateActionPlan(body.card_id, body.user_id, {
       title: body.action_title,
       reason: body.action_reason,
       minutes: body.action_minutes,
       scheduled_date: body.scheduled_date,
+      image_url: body.action_image_url ?? null,
       checklist_done: false,
       checklist_done_at: null,
     });

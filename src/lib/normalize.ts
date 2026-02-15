@@ -36,8 +36,9 @@ const buildPositivePrompt = (theme: string) =>
 
 export const normalizeGemini = (input: GeminiResult): NormalizedGemini => {
   const root = (input as any).reflection ?? input;
-  const negative = root.negative ?? root.negative_card;
-  const positive = root.positive ?? root.positive_card;
+  const cardRoot = root.cards ?? root.card ?? root;
+  const negative = cardRoot.negative ?? cardRoot.negative_card;
+  const positive = cardRoot.positive ?? cardRoot.positive_card;
   const action = root.action;
   const prompts = root.image_prompts ?? (input as any).image_prompts ?? {};
 

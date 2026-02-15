@@ -7,6 +7,7 @@ import { normalizeGemini } from "@/lib/normalize";
 import { randomUUID } from "crypto";
 import { saveCard } from "@/lib/firestore";
 import { Timestamp } from "firebase-admin/firestore";
+import { getOptionalAuthUid } from "@/lib/auth";
 
 const isMock = () => process.env.MOCK_GENERATION === "true";
 
@@ -28,6 +29,14 @@ export async function POST(req: Request) {
   }
 
   try {
+    const uid = await getOptionalAuthUid(req);
+    const ownerId = uid ?? body.user_id;
+    if (!ownerId) {
+      return NextResponse.json({ error: "validation_error", message: "user_id is required" }, { status: 400 });
+    }
+    if (uid && body.user_id && body.user_id !== uid) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
     const gemini = await generateWithGemini(body.anxiety_text);
     const normalized = normalizeGemini(gemini);
 
@@ -48,7 +57,7 @@ export async function POST(req: Request) {
 
     await saveCard({
       ...cleaned,
-      user_id: body.user_id,
+      user_id: ownerId,
       anxiety_text: body.anxiety_text,
       created_at: Timestamp.now(),
       image_status: "pending",

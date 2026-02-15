@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { updateCardImages } from "@/lib/firestore";
 import { uploadCardImage } from "@/lib/storage";
 import { generateImagen } from "@/lib/vertex";
+import { getOptionalAuthUid } from "@/lib/auth";
 
 const isMock = () => process.env.MOCK_GENERATION === "true";
 
@@ -34,6 +35,10 @@ export async function POST(req: Request) {
   }
 
   try {
+    const uid = await getOptionalAuthUid(req);
+    if (uid && body.user_id && body.user_id !== uid) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
     const dataUrl = await generateImagen(body.prompt);
     const kindLabel =
       body.kind === "negative_candidate"
@@ -66,6 +71,15 @@ export async function POST(req: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "image_generation_failed";
+    console.error("image_failed", {
+      message,
+      cardId: body.card_id,
+      kind: body.kind,
+      projectId: process.env.GOOGLE_CLOUD_PROJECT,
+      location: process.env.GOOGLE_CLOUD_LOCATION,
+      model: process.env.VERTEX_AI_MODEL_IMAGEN,
+      bucket: process.env.GCS_BUCKET,
+    });
     const isFiltered = message.includes("raiFilteredReason");
     await updateCardImages(body.card_id, body.user_id, {
       image_status: isFiltered ? "filtered" : "error",
