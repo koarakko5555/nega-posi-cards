@@ -88,8 +88,8 @@ export default function Home() {
     await signOut(auth);
   };
 
-  const authHeader = useMemo(
-    () => (idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+  const authHeader: HeadersInit | undefined = useMemo(
+    () => (idToken ? { Authorization: `Bearer ${idToken}` } : undefined),
     [idToken]
   );
 
@@ -176,7 +176,7 @@ export default function Home() {
     try {
       const res = await fetch("/api/self-image", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
+        headers: { "Content-Type": "application/json", ...(authHeader ?? {}) },
         body: JSON.stringify({ user_id: userId }),
       });
       const json = (await res.json()) as { image_url?: string; description?: string; message?: string };

@@ -118,7 +118,7 @@ export default function CalendarPage() {
   };
 
   const monthKey = `${calendar.year}-${pad(calendar.month + 1)}`;
-  const authHeader = idToken ? { Authorization: `Bearer ${idToken}` } : {};
+  const authHeader: HeadersInit | undefined = idToken ? { Authorization: `Bearer ${idToken}` } : undefined;
 
   const loadCalendar = async (targetUserId: string) => {
     setCalendarError(null);
@@ -164,7 +164,7 @@ export default function CalendarPage() {
     try {
       const res = await fetch("/api/checklist", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
+        headers: { "Content-Type": "application/json", ...(authHeader ?? {}) },
         body: JSON.stringify({
           card_id: item.kind === "card" ? item.card_id : undefined,
           task_id: item.kind === "task" ? item.task_id : undefined,
@@ -188,7 +188,7 @@ export default function CalendarPage() {
     try {
       const res = await fetch("/api/calendar-task", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
+        headers: { "Content-Type": "application/json", ...(authHeader ?? {}) },
         body: JSON.stringify({
           user_id: userId,
           scheduled_date: selectedDate,
@@ -226,7 +226,7 @@ export default function CalendarPage() {
     try {
       const res = await fetch("/api/task-update", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
+        headers: { "Content-Type": "application/json", ...(authHeader ?? {}) },
         body: JSON.stringify({
           kind: editItem.kind,
           user_id: userId,
@@ -255,7 +255,7 @@ export default function CalendarPage() {
     try {
       const res = await fetch("/api/task-delete", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
+        headers: { "Content-Type": "application/json", ...(authHeader ?? {}) },
         body: JSON.stringify({
           kind: item.kind,
           user_id: userId,
@@ -285,7 +285,7 @@ export default function CalendarPage() {
     try {
       const res = await fetch("/api/task-image", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
+        headers: { "Content-Type": "application/json", ...(authHeader ?? {}) },
         body: JSON.stringify({
           task_id: editItem.task_id,
           user_id: userId,

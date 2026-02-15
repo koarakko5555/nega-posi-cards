@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { onAuthStateChanged, signInWithPopup } from "firebase/auth";
@@ -13,7 +13,7 @@ const formatDateKey = (date: Date) =>
 
 const buildInitialCandidates = (count: number) => Array.from({ length: count }, () => null as string | null);
 
-export default function DrawPage() {
+function DrawPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialText = useMemo(() => searchParams.get("text") ?? "", [searchParams]);
@@ -90,7 +90,7 @@ export default function DrawPage() {
     }
   };
 
-  const authHeader = idToken ? { Authorization: `Bearer ${idToken}` } : {};
+  const authHeader: HeadersInit | undefined = idToken ? { Authorization: `Bearer ${idToken}` } : undefined;
 
   const generateCard = async () => {
     if (!effectiveUserId) {
@@ -113,7 +113,7 @@ export default function DrawPage() {
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
+        headers: { "Content-Type": "application/json", ...(authHeader ?? {}) },
         body: JSON.stringify({ anxiety_text: trimmed, user_id: effectiveUserId, locale: "ja-JP" }),
       });
       const json = (await res.json()) as GenerateResponse & { message?: string };
@@ -150,7 +150,7 @@ export default function DrawPage() {
             try {
               const res = await fetch("/api/images", {
                 method: "POST",
-                headers: { "Content-Type": "application/json", ...authHeader },
+                headers: { "Content-Type": "application/json", ...(authHeader ?? {}) },
                 body: JSON.stringify({
                   card_id: data.card_id,
                   user_id: effectiveUserId,
@@ -232,7 +232,7 @@ export default function DrawPage() {
     try {
       await fetch("/api/select-image", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
+        headers: { "Content-Type": "application/json", ...(authHeader ?? {}) },
         body: JSON.stringify({ card_id: data.card_id, user_id: effectiveUserId, image_url: url }),
       });
     } catch {
@@ -255,7 +255,7 @@ export default function DrawPage() {
     try {
       const res = await fetch("/api/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
+        headers: { "Content-Type": "application/json", ...(authHeader ?? {}) },
         body: JSON.stringify({
           card_id: data.card_id,
           user_id: effectiveUserId,
@@ -440,5 +440,13 @@ export default function DrawPage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function DrawPage() {
+  return (
+    <Suspense fallback={<div className="mural-bg min-h-screen text-slate-100" />}>
+      <DrawPageContent />
+    </Suspense>
   );
 }

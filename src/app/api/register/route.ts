@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { updateActionPlan } from "@/lib/firestore";
 import { getOptionalAuthUid } from "@/lib/auth";
-import { getAuthUid } from "@/lib/auth";
 
 type RegisterRequest = {
   card_id: string;
@@ -32,10 +31,6 @@ export async function POST(req: Request) {
   }
 
   try {
-    const uid = await getAuthUid(req);
-    if (body.user_id !== uid) {
-      return NextResponse.json({ error: "forbidden" }, { status: 403 });
-    }
     const uid = await getOptionalAuthUid(req);
     if (uid && uid !== body.user_id) {
       return NextResponse.json({ error: "forbidden" }, { status: 403 });
