@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { getFirebaseAuth, getGoogleProvider, hasFirebaseConfig } from "@/lib/firebaseClient";
-import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { getFirebaseAuth, getGoogleProvider, hasFirebaseConfig, ensureAnonymousUser } from "@/lib/firebaseClient";
+import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth";
 
 type GalleryItem = {
   card_id: string;
@@ -25,9 +25,9 @@ export default function Home() {
   const [selfImageLoading, setSelfImageLoading] = useState(false);
   const [selfImageError, setSelfImageError] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
-  const [anonId, setAnonId] = useState<string | null>(null);
   const [idToken, setIdToken] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authUser, setAuthUser] = useState<User | null>(null);
   const negativeGalleryRef = useRef<HTMLDivElement | null>(null);
   const positiveGalleryRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
@@ -37,32 +37,22 @@ export default function Home() {
     if (!auth) {
       return;
     }
+    void ensureAnonymousUser(auth);
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (!user) {
         setUserId(null);
         setIdToken(null);
+        setAuthUser(null);
         return;
       }
       const token = await user.getIdToken();
       setUserId(user.uid);
       setIdToken(token);
+      setAuthUser(user);
     });
     return () => unsub();
   }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem("nega_posi_anon_id");
-    if (stored) {
-      setAnonId(stored);
-      return;
-    }
-    const created = crypto.randomUUID();
-    window.localStorage.setItem("nega_posi_anon_id", created);
-    setAnonId(created);
-  }, []);
-
-  const effectiveUserId = userId ?? anonId;
+  const effectiveUserId = userId;
 
   const onLogin = async () => {
     setAuthError(null);
@@ -78,7 +68,11 @@ export default function Home() {
       }
       await signInWithPopup(auth, getGoogleProvider());
     } catch (err) {
-      setAuthError(err instanceof Error ? err.message : "ログインに失敗しました");
+      const message = err instanceof Error ? err.message : "ログインに失敗しました";
+      if (message.includes("auth/popup-closed-by-user")) {
+        return;
+      }
+      setAuthError(message);
     }
   };
 
@@ -93,12 +87,24 @@ export default function Home() {
     [idToken]
   );
 
+  const galleryVisibleItems = useMemo(() => {
+    const isValidImage = (url?: string | null) => {
+      if (!url) return false;
+      const trimmed = url.trim();
+      if (!trimmed) return false;
+      return trimmed !== "/calendar-default.svg" && trimmed !== "/file.svg";
+    };
+    return galleryItems.filter(
+      (item) => isValidImage(item.negative_image_url) && isValidImage(item.positive_image_url)
+    );
+  }, [galleryItems]);
+
   const loadGallery = async (targetUserId: string | null) => {
     setGalleryError(null);
     setGalleryLoading(true);
     try {
       const endpoint =
-        idToken && targetUserId
+        idToken && targetUserId && authUser && !authUser.isAnonymous
           ? `/api/history?user_id=${encodeURIComponent(targetUserId)}`
           : "/api/history?public=1";
       const res = await fetch(endpoint, {
@@ -124,8 +130,10 @@ export default function Home() {
     loadGallery(userId);
   }, [userId, idToken]);
 
+  const canUsePersonalFeatures = Boolean(authUser && !authUser.isAnonymous && userId && idToken);
+
   useEffect(() => {
-    if (!userId || !idToken) return;
+    if (!canUsePersonalFeatures || !userId) return;
     const loadSelfImage = async () => {
       try {
         const res = await fetch(`/api/self-image?user_id=${encodeURIComponent(userId)}`, {
@@ -140,18 +148,22 @@ export default function Home() {
       }
     };
     loadSelfImage();
-  }, [userId, idToken]);
+  }, [canUsePersonalFeatures, userId, authHeader]);
 
   const scrollGallery = (ref: { current: HTMLDivElement | null }, direction: number) => {
-    if (!ref.current) return;
-    ref.current.scrollBy({ left: direction * 260, behavior: "smooth" });
+    const el = ref.current;
+    if (!el) return;
+    const cardWidth = el.firstElementChild instanceof HTMLElement ? el.firstElementChild.offsetWidth : 220;
+    const gap = 16;
+    const delta = (cardWidth + gap) * direction;
+    const nextLeft = el.scrollLeft + delta;
+    el.scrollLeft = nextLeft;
+    requestAnimationFrame(() => {
+      el.scrollTo({ left: nextLeft, behavior: "smooth" });
+    });
   };
 
   const onGenerate = async () => {
-    if (!effectiveUserId) {
-      setError("ユーザーIDを生成中です。少し待ってから再試行してください。");
-      return;
-    }
     const trimmed = text.trim();
     if (!trimmed) {
       setError("不安を入力してください");
@@ -160,6 +172,23 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
+      if (!effectiveUserId) {
+        const auth = getFirebaseAuth();
+        const result = await ensureAnonymousUser(auth);
+        let tries = 0;
+        while (!auth?.currentUser && tries < 10) {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          tries += 1;
+        }
+        if (!auth?.currentUser) {
+          if (result?.errorCode === "auth/operation-not-allowed") {
+            setError("匿名ログインが無効です。Firebaseコンソールで匿名認証を有効にしてください。");
+          } else {
+            setError("ユーザー情報の準備中です。少し待ってから再試行してください。");
+          }
+          return;
+        }
+      }
       router.push(`/draw?text=${encodeURIComponent(trimmed)}`);
     } finally {
       setLoading(false);
@@ -236,7 +265,7 @@ export default function Home() {
         </header>
 
         <section className="mb-10 grid gap-6">
-          <div className="mural-card rounded-2xl p-6">
+          <div className="mural-card rounded-2xl p-6" style={{ overflow: "visible" }}>
             <div className="mb-2 text-sm tracking-[0.2em] text-slate-400">今の不安をひとつだけ書いてください</div>
             <textarea
               className="w-full rounded-lg border border-slate-700 bg-slate-950/70 p-4 text-slate-100 placeholder:text-slate-500"
@@ -249,53 +278,46 @@ export default function Home() {
               <button
                 className="rounded-md bg-[#c2a86b] px-4 py-2 text-slate-900 disabled:opacity-50"
                 onClick={onGenerate}
-                disabled={loading || text.trim().length === 0 || !effectiveUserId}
+                disabled={loading || text.trim().length === 0}
               >
                 {loading ? "生成中..." : "カードを引く"}
               </button>
-              {!effectiveUserId && <span className="text-sm text-slate-400">準備中...</span>}
               {error && <span className="text-rose-400">{error}</span>}
             </div>
           </div>
 
           <div className="mural-card rounded-2xl p-6">
-            <div className="mb-4 text-sm tracking-[0.2em] text-slate-400">
-              {idToken ? "あなたが最近生み出したイメージカード" : "みんなが最近生み出したイメージカード"}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="text-sm tracking-[0.2em] text-slate-400">
+                {canUsePersonalFeatures ? "あなたが最近生み出したイメージカード" : "イメージカード（例）"}
+              </div>
+              {canUsePersonalFeatures && (
+                <Link
+                  href="/gallery"
+                  className="rounded-md border border-slate-600 px-3 py-1.5 text-sm text-slate-200"
+                >
+                  もっと見る
+                </Link>
+              )}
             </div>
             {galleryLoading && <div className="text-sm text-slate-400">読み込み中...</div>}
             {galleryError && <div className="text-sm text-rose-400">{galleryError}</div>}
-            {!galleryLoading && !galleryError && galleryItems.length === 0 && (
+            {!galleryLoading && !galleryError && galleryVisibleItems.length === 0 && (
               <div className="text-sm text-slate-500">まだカードがありません</div>
             )}
-            {!galleryLoading && !galleryError && galleryItems.length > 0 && (
+            {!galleryLoading && !galleryError && galleryVisibleItems.length > 0 && (
               <div className="grid gap-6">
                 <div>
-                  <div className="mb-3 flex items-center justify-between">
-                    <div className="text-xs tracking-[0.25em] text-slate-400">不安カード</div>
-                    <div className="flex items-center gap-2 text-xs text-slate-300">
-                      <button
-                        className="rounded-full border border-slate-600 px-2 py-0.5 text-xs text-slate-300"
-                        onClick={() => scrollGallery(negativeGalleryRef, -1)}
-                      >
-                        &lt;
-                      </button>
-                      <button
-                        className="rounded-full border border-slate-600 px-2 py-0.5 text-xs text-slate-300"
-                        onClick={() => scrollGallery(negativeGalleryRef, 1)}
-                      >
-                        &gt;
-                      </button>
-                    </div>
-                  </div>
-                  <div ref={negativeGalleryRef} className="flex gap-4 overflow-x-auto pb-2 pt-1 scroll-smooth">
-                    {galleryItems.map((item) => (
+                  <div className="mb-3 text-xs tracking-[0.25em] text-slate-400">不安カード</div>
+                  <div className="flex items-center gap-3 overflow-hidden">
+                    {galleryVisibleItems.slice(0, 12).map((item) => (
                       <div
-                        key={`neg-${item.card_id}`}
-                        className="relative h-40 w-28 shrink-0 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60"
+                        key={`preview-neg-${item.card_id}`}
+                        className="relative h-36 w-24 shrink-0 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60"
                         title={item.created_at ?? undefined}
                       >
                         <img
-                          src={item.negative_image_url || "/calendar-default.svg"}
+                          src={item.negative_image_url || ""}
                           alt="不安カード"
                           className="h-full w-full object-cover"
                         />
@@ -305,32 +327,16 @@ export default function Home() {
                   </div>
                 </div>
                 <div>
-                  <div className="mb-3 flex items-center justify-between">
-                    <div className="text-xs tracking-[0.25em] text-slate-400">アクションカード</div>
-                    <div className="flex items-center gap-2 text-xs text-slate-300">
-                      <button
-                        className="rounded-full border border-slate-600 px-2 py-0.5 text-xs text-slate-300"
-                        onClick={() => scrollGallery(positiveGalleryRef, -1)}
-                      >
-                        &lt;
-                      </button>
-                      <button
-                        className="rounded-full border border-slate-600 px-2 py-0.5 text-xs text-slate-300"
-                        onClick={() => scrollGallery(positiveGalleryRef, 1)}
-                      >
-                        &gt;
-                      </button>
-                    </div>
-                  </div>
-                  <div ref={positiveGalleryRef} className="flex gap-4 overflow-x-auto pb-2 pt-1 scroll-smooth">
-                    {galleryItems.map((item) => (
+                  <div className="mb-3 text-xs tracking-[0.25em] text-slate-400">アクションカード</div>
+                  <div className="flex items-center gap-3 overflow-hidden">
+                    {galleryVisibleItems.slice(0, 12).map((item) => (
                       <div
-                        key={`pos-${item.card_id}`}
-                        className="relative h-40 w-28 shrink-0 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60"
+                        key={`preview-pos-${item.card_id}`}
+                        className="relative h-36 w-24 shrink-0 overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/60"
                         title={item.created_at ?? undefined}
                       >
                         <img
-                          src={item.positive_image_url || "/calendar-default.svg"}
+                          src={item.positive_image_url || ""}
                           alt="アクションカード"
                           className="h-full w-full object-cover"
                         />
@@ -366,13 +372,22 @@ export default function Home() {
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <button
-                    className="rounded-md bg-emerald-300 px-4 py-2 text-emerald-950 disabled:opacity-50"
-                    onClick={onGenerateSelfImage}
-                    disabled={selfImageLoading}
-                  >
-                    {selfImageLoading ? "生成中..." : "自分を見つけましょう"}
-                  </button>
+                  {canUsePersonalFeatures ? (
+                    <button
+                      className="rounded-md bg-emerald-300 px-4 py-2 text-emerald-950 disabled:opacity-50"
+                      onClick={onGenerateSelfImage}
+                      disabled={selfImageLoading}
+                    >
+                      {selfImageLoading ? "生成中..." : "自分を見つけましょう"}
+                    </button>
+                  ) : (
+                    <button
+                      className="rounded-md border border-slate-600 px-4 py-2 text-slate-200"
+                      onClick={onLogin}
+                    >
+                      Googleでログインしてください
+                    </button>
+                  )}
                   {selfImageError && <span className="text-sm text-rose-400">{selfImageError}</span>}
                 </div>
               </div>

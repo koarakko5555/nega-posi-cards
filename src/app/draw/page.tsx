@@ -3,8 +3,8 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { onAuthStateChanged, signInWithPopup } from "firebase/auth";
-import { getFirebaseAuth, getGoogleProvider, hasFirebaseConfig } from "@/lib/firebaseClient";
+import { onAuthStateChanged, signInWithPopup, type User } from "firebase/auth";
+import { getFirebaseAuth, getGoogleProvider, hasFirebaseConfig, ensureAnonymousUser } from "@/lib/firebaseClient";
 import type { GenerateResponse } from "@/lib/types";
 
 const pad = (value: number) => String(value).padStart(2, "0");
@@ -12,6 +12,55 @@ const formatDateKey = (date: Date) =>
   `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 
 const buildInitialCandidates = (count: number) => Array.from({ length: count }, () => null as string | null);
+const buildInitialErrors = (count: number) => Array.from({ length: count }, () => null as string | null);
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const shouldRetryImage = (status: number, message?: string) => {
+  if (status === 429) return true;
+  if (!message) return false;
+  return (
+    message.includes("RESOURCE_EXHAUSTED") ||
+    message.includes("Quota exceeded") ||
+    message.includes("429")
+  );
+};
+
+const fetchImageWithRetry = async (
+  payload: Record<string, unknown>,
+  getAuthHeader: (force?: boolean) => Promise<HeadersInit | undefined>,
+  maxRetries = 2
+): Promise<{ imageUrl?: string; message?: string }> => {
+  let lastMessage = "画像を生成できませんでした";
+  let lastStatus = 0;
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    const authHeader = await getAuthHeader(attempt > 0);
+    const res = await fetch("/api/images", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(authHeader ?? {}) },
+      body: JSON.stringify(payload),
+    });
+    lastStatus = res.status;
+    const json = (await res.json().catch(() => ({}))) as { image_url?: string; message?: string; error?: string };
+    const message = json.message || json.error || lastMessage;
+    lastMessage = message;
+    if (res.ok && json.image_url) {
+      return { imageUrl: json.image_url };
+    }
+    if (res.ok) {
+      return { message };
+    }
+    if (message.includes("auth/id-token-expired") && attempt < maxRetries) {
+      await wait(400);
+      continue;
+    }
+    if (shouldRetryImage(lastStatus, message) && attempt < maxRetries) {
+      await wait(900 + attempt * 800);
+      continue;
+    }
+    return { message };
+  }
+  return { message: lastMessage };
+};
 
 function DrawPageContent() {
   const router = useRouter();
@@ -19,8 +68,7 @@ function DrawPageContent() {
   const initialText = useMemo(() => searchParams.get("text") ?? "", [searchParams]);
 
   const [userId, setUserId] = useState<string | null>(null);
-  const [anonId, setAnonId] = useState<string | null>(null);
-  const [idToken, setIdToken] = useState<string | null>(null);
+  const [authUser, setAuthUser] = useState<User | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
   const [anxietyText, setAnxietyText] = useState(initialText);
@@ -29,6 +77,8 @@ function DrawPageContent() {
   const [data, setData] = useState<GenerateResponse | null>(null);
 
   const [candidateUrls, setCandidateUrls] = useState<Array<string | null>>(() => buildInitialCandidates(3));
+  const [candidateErrors, setCandidateErrors] = useState<Array<string | null>>(() => buildInitialErrors(3));
+  const [candidateBusy, setCandidateBusy] = useState<Array<boolean>>(() => Array(3).fill(false));
   const [candidateLoading, setCandidateLoading] = useState(false);
   const [selectedUrl, setSelectedUrl] = useState<string | null>(null);
 
@@ -37,6 +87,7 @@ function DrawPageContent() {
   const [actionMinutes, setActionMinutes] = useState<number | undefined>(undefined);
   const [actionImageUrl, setActionImageUrl] = useState<string | null>(null);
   const [actionImageLoading, setActionImageLoading] = useState(false);
+  const [actionImageError, setActionImageError] = useState<string | null>(null);
   const [scheduledDate, setScheduledDate] = useState(formatDateKey(new Date()));
   const [registering, setRegistering] = useState(false);
   const [registeredDate, setRegisteredDate] = useState<string | null>(null);
@@ -48,29 +99,16 @@ function DrawPageContent() {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (!user) {
         setUserId(null);
-        setIdToken(null);
+        setAuthUser(null);
+        await ensureAnonymousUser(auth);
         return;
       }
-      const token = await user.getIdToken();
       setUserId(user.uid);
-      setIdToken(token);
+      setAuthUser(user);
     });
     return () => unsub();
   }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem("nega_posi_anon_id");
-    if (stored) {
-      setAnonId(stored);
-      return;
-    }
-    const created = crypto.randomUUID();
-    window.localStorage.setItem("nega_posi_anon_id", created);
-    setAnonId(created);
-  }, []);
-
-  const effectiveUserId = userId ?? anonId;
+  const effectiveUserId = userId;
 
   const onLogin = async () => {
     setAuthError(null);
@@ -90,7 +128,13 @@ function DrawPageContent() {
     }
   };
 
-  const authHeader: HeadersInit | undefined = idToken ? { Authorization: `Bearer ${idToken}` } : undefined;
+  const getAuthHeader = async (force = false): Promise<HeadersInit | undefined> => {
+    const auth = getFirebaseAuth();
+    const user = auth?.currentUser ?? authUser;
+    if (!user) return undefined;
+    const token = await user.getIdToken(force);
+    return { Authorization: `Bearer ${token}` };
+  };
 
   const generateCard = async () => {
     if (!effectiveUserId) {
@@ -108,9 +152,13 @@ function DrawPageContent() {
     setSelectedUrl(null);
     setRegisteredDate(null);
     setCandidateUrls(buildInitialCandidates(3));
+    setCandidateErrors(buildInitialErrors(3));
+    setCandidateBusy(Array(3).fill(false));
     setActionImageUrl(null);
+    setActionImageError(null);
 
     try {
+      const authHeader = await getAuthHeader();
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(authHeader ?? {}) },
@@ -118,6 +166,23 @@ function DrawPageContent() {
       });
       const json = (await res.json()) as GenerateResponse & { message?: string };
       if (!res.ok) {
+        if (json.message?.includes("auth/id-token-expired")) {
+          const refreshed = await getAuthHeader(true);
+          const retry = await fetch("/api/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...(refreshed ?? {}) },
+            body: JSON.stringify({ anxiety_text: trimmed, user_id: effectiveUserId, locale: "ja-JP" }),
+          });
+          const retryJson = (await retry.json()) as GenerateResponse & { message?: string };
+          if (!retry.ok) {
+            throw new Error(retryJson.message || "生成に失敗しました");
+          }
+          setData(retryJson);
+          setActionTitle(retryJson.action.title);
+          setActionDetail(retryJson.action.reason);
+          setActionMinutes(retryJson.action.minutes);
+          return;
+        }
         throw new Error(json.message || "生成に失敗しました");
       }
       setData(json);
@@ -145,36 +210,64 @@ function DrawPageContent() {
     const run = async () => {
       setCandidateLoading(true);
       try {
-        await Promise.all(
-          candidateUrls.map(async (_item, index) => {
-            try {
-              const res = await fetch("/api/images", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", ...(authHeader ?? {}) },
-                body: JSON.stringify({
-                  card_id: data.card_id,
-                  user_id: effectiveUserId,
-                  kind: "negative_candidate",
-                  prompt: data.negative.image_prompt,
-                  candidate_index: index,
-                }),
+        for (let index = 0; index < candidateUrls.length; index += 1) {
+          if (cancelled) break;
+          try {
+            if (!cancelled) {
+              setCandidateBusy((prev) => {
+                const next = [...prev];
+                next[index] = true;
+                return next;
               });
-              const json = (await res.json()) as { image_url?: string; message?: string };
-              if (!res.ok) {
-                throw new Error(json.message || "画像生成に失敗しました");
-              }
+            }
+            const result = await fetchImageWithRetry(
+              {
+                card_id: data.card_id,
+                user_id: effectiveUserId,
+                kind: "negative_candidate",
+                prompt: data.negative.image_prompt,
+                candidate_index: index,
+              },
+              getAuthHeader
+            );
+            if (!result.imageUrl) {
+              const message = result.message || "画像を生成できませんでした";
               if (!cancelled) {
-                setCandidateUrls((prev) => {
+                setCandidateErrors((prev) => {
                   const next = [...prev];
-                  next[index] = json.image_url ?? null;
+                  next[index] = message;
                   return next;
                 });
               }
-            } catch {
-              // skip failed candidate
+              continue;
             }
-          })
-        );
+            if (!cancelled) {
+              setCandidateUrls((prev) => {
+                const next = [...prev];
+                next[index] = result.imageUrl ?? null;
+                return next;
+              });
+            }
+          } catch (err) {
+            const message = err instanceof Error ? err.message : "画像生成に失敗しました";
+            if (!cancelled) {
+              setCandidateErrors((prev) => {
+                const next = [...prev];
+                next[index] = message;
+                return next;
+              });
+            }
+          } finally {
+            if (!cancelled) {
+              setCandidateBusy((prev) => {
+                const next = [...prev];
+                next[index] = false;
+                return next;
+              });
+            }
+            await wait(800);
+          }
+        }
       } finally {
         if (!cancelled) {
           setCandidateLoading(false);
@@ -192,27 +285,32 @@ function DrawPageContent() {
     let cancelled = false;
     const run = async () => {
       setActionImageLoading(true);
+      if (candidateLoading) {
+        await wait(1200);
+      }
       try {
-        const res = await fetch("/api/images", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeader },
-          body: JSON.stringify({
+        const result = await fetchImageWithRetry(
+          {
             card_id: data.card_id,
             user_id: effectiveUserId,
             kind: "positive",
             prompt: data.positive.image_prompt,
-          }),
-        });
-        const json = (await res.json()) as { image_url?: string; message?: string };
-        if (!res.ok) {
-          throw new Error(json.message || "画像生成に失敗しました");
+          },
+          getAuthHeader
+        );
+        if (!result.imageUrl) {
+          if (!cancelled) {
+            setActionImageError(result.message || "画像を生成できませんでした");
+          }
+          return;
         }
         if (!cancelled) {
-          setActionImageUrl(json.image_url ?? null);
+          setActionImageUrl(result.imageUrl ?? null);
         }
       } catch {
         if (!cancelled) {
           setActionImageUrl(null);
+          setActionImageError("画像を生成できませんでした");
         }
       } finally {
         if (!cancelled) {
@@ -230,6 +328,7 @@ function DrawPageContent() {
     if (!data || !effectiveUserId) return;
     setSelectedUrl(url);
     try {
+      const authHeader = await getAuthHeader();
       await fetch("/api/select-image", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(authHeader ?? {}) },
@@ -240,8 +339,57 @@ function DrawPageContent() {
     }
   };
 
-  const onRegister = async () => {
+  const retryCandidate = async (index: number) => {
     if (!data || !effectiveUserId) return;
+    setCandidateErrors((prev) => {
+      const next = [...prev];
+      next[index] = null;
+      return next;
+    });
+    setCandidateBusy((prev) => {
+      const next = [...prev];
+      next[index] = true;
+      return next;
+    });
+    try {
+      const result = await fetchImageWithRetry(
+        {
+          card_id: data.card_id,
+          user_id: effectiveUserId,
+          kind: "negative_candidate",
+          prompt: data.negative.image_prompt,
+          candidate_index: index,
+        },
+        getAuthHeader
+      );
+      if (!result.imageUrl) {
+        setCandidateErrors((prev) => {
+          const next = [...prev];
+          next[index] = result.message || "画像を生成できませんでした";
+          return next;
+        });
+        return;
+      }
+      setCandidateUrls((prev) => {
+        const next = [...prev];
+        next[index] = result.imageUrl ?? null;
+        return next;
+      });
+    } finally {
+      setCandidateBusy((prev) => {
+        const next = [...prev];
+        next[index] = false;
+        return next;
+      });
+    }
+  };
+
+  const onRegister = async () => {
+    if (!data) return;
+    if (!userId) {
+      setError("ログインが必要です");
+      return;
+    }
     if (!selectedUrl) {
       setError("画像を選択してください");
       return;
@@ -253,12 +401,13 @@ function DrawPageContent() {
     setRegistering(true);
     setError(null);
     try {
+      const authHeader = await getAuthHeader();
       const res = await fetch("/api/register", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(authHeader ?? {}) },
         body: JSON.stringify({
           card_id: data.card_id,
-          user_id: effectiveUserId,
+          user_id: userId,
           scheduled_date: scheduledDate,
           action_title: actionTitle.trim(),
           action_reason: actionDetail.trim(),
@@ -271,7 +420,7 @@ function DrawPageContent() {
         throw new Error(json.message || "登録に失敗しました");
       }
       setRegisteredDate(json.scheduled_date ?? scheduledDate);
-      router.push("/");
+      router.push("/calendar");
     } catch (err) {
       setError(err instanceof Error ? err.message : "登録に失敗しました");
     } finally {
@@ -324,7 +473,6 @@ function DrawPageContent() {
 
         <section className="mural-card rounded-2xl p-6">
           <div className="mb-2 text-sm tracking-[0.2em] text-slate-400">今の不安をひとつだけ書いてください</div>
-          <div className="mb-4 text-xs text-slate-500">不安の入力</div>
           <textarea
             className="w-full rounded-lg border border-slate-700 bg-slate-950/70 p-4 text-slate-100 placeholder:text-slate-500"
             rows={4}
@@ -353,26 +501,61 @@ function DrawPageContent() {
               </div>
               <div className="grid gap-4 md:grid-cols-3">
                 {candidateUrls.map((url, index) => {
-                  const selected = url && selectedUrl === url;
+                  const selected = Boolean(url && selectedUrl === url);
+                  const handleCandidateKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+                    if (!url) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onSelectCandidate(url);
+                    }
+                  };
+
                   return (
-                    <button
+                    <div
                       key={`${url ?? "candidate"}-${index}`}
-                      type="button"
-                      onClick={() => url && onSelectCandidate(url)}
+                      role="button"
+                      tabIndex={url ? 0 : -1}
+                      aria-pressed={selected ? "true" : "false"}
+                      onClick={() => {
+                        if (url) {
+                          void onSelectCandidate(url);
+                        }
+                      }}
+                      onKeyDown={handleCandidateKey}
                       className={`mural-frame relative overflow-hidden rounded-2xl transition ${
                         selected ? "ring-4 ring-emerald-300" : "ring-1 ring-transparent"
-                      }`}
+                      } ${url ? "cursor-pointer" : "cursor-default"}`}
                       style={{ aspectRatio: "9 / 16" }}
                     >
                       {url ? (
                         <img src={url} alt={`候補${index + 1}`} className="h-full w-full object-cover" />
                       ) : (
-                        <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">
-                          {candidateLoading ? "生成中..." : "画像を生成できませんでした"}
+                        <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-xs text-slate-400">
+                          <span>
+                            {candidateErrors[index]
+                              ? candidateErrors[index]
+                              : candidateBusy[index]
+                                ? "生成中..."
+                                : candidateLoading
+                                  ? "生成待機中..."
+                                  : "画像を生成できませんでした"}
+                          </span>
+                          {!candidateBusy[index] && candidateErrors[index] && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                retryCandidate(index);
+                              }}
+                              className="rounded-full border border-slate-500 px-3 py-1 text-[11px] text-slate-200"
+                            >
+                              再生成
+                            </button>
+                          )}
                         </div>
                       )}
                       {selected && <div className="absolute inset-0 border-2 border-emerald-200" />}
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -387,7 +570,9 @@ function DrawPageContent() {
                       <img src={actionImageUrl} alt="行動のイメージ" className="h-full w-full object-cover" />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-xs text-slate-400">
-                        {actionImageLoading ? "生成中..." : "画像を生成できませんでした"}
+                        {actionImageLoading
+                          ? "生成中..."
+                          : actionImageError || "画像を生成できませんでした"}
                       </div>
                     )}
                   </div>
@@ -420,13 +605,22 @@ function DrawPageContent() {
                         onChange={(e) => setScheduledDate(e.target.value)}
                       />
                     </label>
-                    <button
-                      className="rounded-md bg-emerald-300 px-4 py-2 text-emerald-950 disabled:opacity-50"
-                      onClick={onRegister}
-                      disabled={registering}
-                    >
-                      {registering ? "登録中..." : "カレンダーに登録"}
-                    </button>
+                    {userId ? (
+                      <button
+                        className="rounded-md bg-emerald-300 px-4 py-2 text-emerald-950 disabled:opacity-50"
+                        onClick={onRegister}
+                        disabled={registering}
+                      >
+                        {registering ? "登録中..." : "カレンダーに登録"}
+                      </button>
+                    ) : (
+                      <button
+                        className="rounded-md border border-slate-600 px-4 py-2 text-slate-200"
+                        onClick={onLogin}
+                      >
+                        Googleでログインしてください
+                      </button>
+                    )}
                     {registeredDate && (
                       <span className="text-sm text-emerald-300">
                         {registeredDate} に登録しました

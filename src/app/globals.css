@@ -95,3 +95,27 @@ body {
   text-transform: uppercase;
   color: rgba(194, 168, 107, 0.75);
 }
+
+.h-scroll {
+  overflow-x: scroll;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(194, 168, 107, 0.8) rgba(10, 12, 20, 0.2);
+}
+
+.h-scroll::-webkit-scrollbar {
+  height: 12px;
+}
+
+.h-scroll::-webkit-scrollbar-track {
+  background: rgba(10, 12, 20, 0.2);
+  border-radius: 999px;
+}
+
+.h-scroll::-webkit-scrollbar-thumb {
+  background: rgba(194, 168, 107, 0.75);
+  border-radius: 999px;
+}

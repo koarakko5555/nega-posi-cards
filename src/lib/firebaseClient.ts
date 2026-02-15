@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from "firebase/app";
-import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { getAuth, GoogleAuthProvider, signInAnonymously, type Auth, type User } from "firebase/auth";
 
 type FirebaseConfig = {
   apiKey: string;
@@ -33,3 +33,22 @@ export const getFirebaseAuth = () => {
 };
 
 export const getGoogleProvider = () => new GoogleAuthProvider();
+
+export type AnonymousResult = {
+  user: User | null;
+  errorCode?: string;
+  errorMessage?: string;
+};
+
+export const ensureAnonymousUser = async (auth: Auth | null): Promise<AnonymousResult> => {
+  if (!auth) return { user: null, errorCode: "auth/not-initialized", errorMessage: "auth not initialized" };
+  if (auth.currentUser) return { user: auth.currentUser };
+  try {
+    const result = await signInAnonymously(auth);
+    return { user: result.user };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "anonymous_failed";
+    const codeMatch = message.match(/auth\/[a-zA-Z-]+/);
+    return { user: null, errorCode: codeMatch?.[0], errorMessage: message };
+  }
+};

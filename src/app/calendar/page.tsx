@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getFirebaseAuth, getGoogleProvider, hasFirebaseConfig } from "@/lib/firebaseClient";
+import { getFirebaseAuth, getGoogleProvider, hasFirebaseConfig, ensureAnonymousUser } from "@/lib/firebaseClient";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 
 type CalendarItem = {
@@ -55,8 +55,6 @@ export default function CalendarPage() {
   const [calendarItems, setCalendarItems] = useState<CalendarItem[]>([]);
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [calendarError, setCalendarError] = useState<string | null>(null);
-  const [newTaskTitle, setNewTaskTitle] = useState("");
-  const [taskSaving, setTaskSaving] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [idToken, setIdToken] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -84,6 +82,7 @@ export default function CalendarPage() {
       if (!user) {
         setUserId(null);
         setIdToken(null);
+        await ensureAnonymousUser(auth);
         return;
       }
       const token = await user.getIdToken();
@@ -179,32 +178,6 @@ export default function CalendarPage() {
       }
     } catch {
       // no-op
-    }
-  };
-
-  const onAddCalendarTask = async () => {
-    if (!userId || newTaskTitle.trim().length === 0) return;
-    setTaskSaving(true);
-    try {
-      const res = await fetch("/api/calendar-task", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...(authHeader ?? {}) },
-        body: JSON.stringify({
-          user_id: userId,
-          scheduled_date: selectedDate,
-          action_title: newTaskTitle.trim(),
-        }),
-      });
-      if (!res.ok) {
-        const json = (await res.json()) as { message?: string };
-        throw new Error(json.message || "タスクの追加に失敗しました");
-      }
-      setNewTaskTitle("");
-      await loadCalendar(userId);
-    } catch (err) {
-      setCalendarError(err instanceof Error ? err.message : "タスクの追加に失敗しました");
-    } finally {
-      setTaskSaving(false);
     }
   };
 
@@ -383,6 +356,129 @@ export default function CalendarPage() {
 
         <section className="mb-10 grid gap-6">
           <div className="mural-card rounded-2xl p-6">
+            <div className="mb-4 flex items-center justify-between text-xs text-slate-400">
+              <span>今日がんばってみること（{selectedDate}）</span>
+              <span>
+                {completedCount}/{totalCount}
+              </span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-slate-800">
+              <div
+                className="h-2 rounded-full bg-emerald-300 transition-all"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+            {calendarLoading && <div className="mt-2 text-sm text-slate-400">読み込み中...</div>}
+            {calendarError && <div className="mt-2 text-sm text-rose-400">{calendarError}</div>}
+            {!calendarLoading && !calendarError && selectedItems.length === 0 && (
+              <div className="mt-2 text-sm text-slate-500">登録された行動はありません</div>
+            )}
+            {!calendarLoading && !calendarError && selectedItems.length > 0 && (
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {selectedItems.map((item) => (
+                  <label
+                    key={item.id}
+                    className="group relative overflow-hidden rounded-xl border border-slate-800 bg-slate-900/60 text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={item.checklist_done}
+                      onChange={(e) => onToggleChecklistItem(item, e.target.checked)}
+                      className="absolute left-3 top-3 z-10 h-4 w-4"
+                    />
+                    <div className="relative h-28 w-full overflow-hidden">
+                      <div
+                        className="absolute inset-0"
+                        style={{ clipPath: "polygon(0 0, 65% 0, 38% 100%, 0 100%)" }}
+                      >
+                        <img
+                          src={getNegativeImage(item)}
+                          alt="ネガティブ画像"
+                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                        />
+                      </div>
+                      <div
+                        className="absolute inset-0"
+                        style={{ clipPath: "polygon(65% 0, 100% 0, 100% 100%, 38% 100%)" }}
+                      >
+                        <img
+                          src={getPositiveImage(item)}
+                          alt="ポジティブ画像"
+                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                        />
+                      </div>
+                      <div className="absolute -top-8 left-[51%] h-48 w-0.5 -translate-x-1/2 -rotate-[75deg] bg-white/70 shadow-[0_0_8px_rgba(255,255,255,0.45)]" />
+                      <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                    </div>
+                    <div className="px-3 pb-3 pt-2">
+                      <div
+                        className={`line-clamp-2 ${
+                          item.checklist_done ? "line-through text-slate-500" : "text-slate-100"
+                        }`}
+                      >
+                        {item.action_title}
+                      </div>
+                      <div className="mt-2 flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              openEditModal(item);
+                            }}
+                            className="rounded-full border border-slate-600 bg-slate-900/80 px-2 py-1 text-[12px] text-slate-200"
+                            aria-label="編集"
+                          >
+                          <svg
+                            className="h-3.5 w-3.5"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <path d="M12 20h9" />
+                            <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                          </svg>
+                        </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              onDeleteItem(item);
+                            }}
+                            className="rounded-full border border-rose-500/60 bg-rose-500/10 px-2 py-1 text-[12px] text-rose-200"
+                            aria-label="削除"
+                          >
+                          <svg
+                            className="h-3.5 w-3.5"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M8 6v-2a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                            <line x1="10" y1="11" x2="10" y2="17" />
+                            <line x1="14" y1="11" x2="14" y2="17" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="mural-card rounded-2xl p-6">
             <div className="mb-4 flex items-center justify-between">
               <div className="text-sm tracking-[0.2em] text-slate-400">カレンダー</div>
               <div className="flex items-center gap-2 text-sm text-slate-300">
@@ -427,7 +523,7 @@ export default function CalendarPage() {
                       : cell.isToday
                         ? "bg-amber-200 text-slate-900 ring-1 ring-amber-300"
                         : cell.day
-                          ? itemsByDate[cell.dateKey || ""] 
+                          ? itemsByDate[cell.dateKey || ""]
                             ? "bg-slate-900/70 text-slate-100"
                             : "bg-slate-900/40 text-slate-200"
                           : "text-slate-700"
@@ -469,143 +565,6 @@ export default function CalendarPage() {
                   </div>
                 </button>
               ))}
-            </div>
-            <div className="mt-6">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>チェックリスト（{selectedDate}）</span>
-                <span>
-                  {completedCount}/{totalCount}
-                </span>
-              </div>
-              <div className="mt-2 h-2 w-full rounded-full bg-slate-800">
-                <div
-                  className="h-2 rounded-full bg-emerald-300 transition-all"
-                  style={{ width: `${progressPct}%` }}
-                />
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <input
-                  className="min-w-[220px] flex-1 rounded-lg border border-slate-700 bg-slate-950/70 px-3 py-2 text-sm text-slate-100"
-                  placeholder="やることを追加"
-                  value={newTaskTitle}
-                  onChange={(e) => setNewTaskTitle(e.target.value)}
-                />
-                <button
-                  className="rounded-md bg-emerald-300 px-3 py-2 text-sm text-emerald-950 disabled:opacity-50"
-                  onClick={onAddCalendarTask}
-                  disabled={taskSaving || newTaskTitle.trim().length === 0}
-                >
-                  {taskSaving ? "追加中..." : "追加"}
-                </button>
-              </div>
-              {calendarLoading && <div className="mt-2 text-sm text-slate-400">読み込み中...</div>}
-              {calendarError && <div className="mt-2 text-sm text-rose-400">{calendarError}</div>}
-              {!calendarLoading && !calendarError && selectedItems.length === 0 && (
-                <div className="mt-2 text-sm text-slate-500">登録された行動はありません</div>
-              )}
-              {!calendarLoading && !calendarError && selectedItems.length > 0 && (
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  {selectedItems.map((item) => (
-                    <label
-                      key={item.id}
-                      className="group relative overflow-hidden rounded-xl border border-slate-800 bg-slate-900/60 text-sm"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={item.checklist_done}
-                        onChange={(e) => onToggleChecklistItem(item, e.target.checked)}
-                        className="absolute left-3 top-3 z-10 h-4 w-4"
-                      />
-                      <div className="relative h-28 w-full overflow-hidden">
-                        <div
-                          className="absolute inset-0"
-                          style={{ clipPath: "polygon(0 0, 65% 0, 38% 100%, 0 100%)" }}
-                        >
-                          <img
-                            src={getNegativeImage(item)}
-                            alt="ネガティブ画像"
-                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                          />
-                        </div>
-                        <div
-                          className="absolute inset-0"
-                          style={{ clipPath: "polygon(65% 0, 100% 0, 100% 100%, 38% 100%)" }}
-                        >
-                          <img
-                            src={getPositiveImage(item)}
-                            alt="ポジティブ画像"
-                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                          />
-                        </div>
-                        <div className="absolute -top-8 left-[51%] h-48 w-0.5 -translate-x-1/2 -rotate-[75deg] bg-white/70 shadow-[0_0_8px_rgba(255,255,255,0.45)]" />
-                        <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
-                      </div>
-                      <div className="px-3 pb-3 pt-2">
-                        <div
-                          className={`line-clamp-2 ${
-                            item.checklist_done ? "line-through text-slate-500" : "text-slate-100"
-                          }`}
-                        >
-                          {item.action_title}
-                        </div>
-                        <div className="mt-2 flex items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              openEditModal(item);
-                            }}
-                            className="rounded-full border border-slate-600 bg-slate-900/80 px-2 py-1 text-[12px] text-slate-200"
-                            aria-label="編集"
-                          >
-                            <svg
-                              className="h-3.5 w-3.5"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              aria-hidden="true"
-                            >
-                              <path d="M12 20h9" />
-                              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-                            </svg>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              onDeleteItem(item);
-                            }}
-                            className="rounded-full border border-rose-500/60 bg-rose-500/10 px-2 py-1 text-[12px] text-rose-200"
-                            aria-label="削除"
-                          >
-                            <svg
-                              className="h-3.5 w-3.5"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              aria-hidden="true"
-                            >
-                              <polyline points="3 6 5 6 21 6" />
-                              <path d="M8 6v-2a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                              <line x1="10" y1="11" x2="10" y2="17" />
-                              <line x1="14" y1="11" x2="14" y2="17" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
         </section>
