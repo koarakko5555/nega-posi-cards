@@ -91,7 +91,7 @@ Based on the recent card summaries, generate:
   The tone should be very gentle, concrete, and kind. Use specific wording rather than abstract generalities.
 - image_prompt: an Imagen prompt for a single image that represents the user's current state.
 
-The image should feel gentle, hopeful, and introspective (not scary), with symbolic non-figurative motifs. Silhouettes are allowed. No text, no letters, no typography. Modern/anime-inspired, painterly shading, soft contrast, 9:16 aspect ratio, highly detailed.
+The image should feel gentle, hopeful, and introspective (not scary), with symbolic non-figurative motifs. Silhouettes are allowed. Avoid child-like features or minors; if a human appears, it must be an adult silhouette only. No close-up faces. No text, no letters, no typography. Modern/anime-inspired, painterly shading, soft contrast, 9:16 aspect ratio, highly detailed.
 
 Output JSON schema:
 {
